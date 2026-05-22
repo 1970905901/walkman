@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>remote-notification</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Music CDNs across kw/kg/wy/tx/mg are mostly HTTP with rotating hosts.
+		     NSAllowsArbitraryLoadsInMedia alone doesn't cover URLSession requests the
+		     scripts make; NSAllowsArbitraryLoads makes both AVPlayer and URLSession work. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInMedia</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
