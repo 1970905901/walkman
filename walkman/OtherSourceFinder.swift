@@ -12,7 +12,9 @@ nonisolated enum OtherSourceFinder {
 
     /// Searches all platforms (except the original source) for songs matching `track`'s
     /// name + singer, ranks them via the same algorithm as official `findMusic`.
-    static func findMatches(for track: Track) async -> [Track] {
+    /// `maxIntervalDiff` is the allowed duration gap (seconds) for two tracks to count as the same
+    /// song — 5s for playback fallback, looser (e.g. 10s) when borrowing lyrics.
+    static func findMatches(for track: Track, maxIntervalDiff: Int = 5) async -> [Track] {
         let query = "\(track.name) \(track.singer)".trimmingCharacters(in: .whitespaces)
         var groups: [SourceID: [Track]] = [:]
         await withTaskGroup(of: (SourceID, [Track]).self) { group in
@@ -24,7 +26,7 @@ nonisolated enum OtherSourceFinder {
             }
             for await (src, tracks) in group { groups[src] = tracks }
         }
-        return rank(groups: groups, against: track)
+        return rank(groups: groups, against: track, maxIntervalDiff: maxIntervalDiff)
     }
 
     // MARK: - Matching / ranking — mirrors `findMusic` in musicSdk/index.js#L73-167
@@ -47,13 +49,13 @@ nonisolated enum OtherSourceFinder {
     private static func getInterval(_ secs: Int?) -> Int { secs ?? 0 }
 
     /// Ranks candidates by similarity to target. Returns flat list, best matches first.
-    private static func rank(groups: [SourceID: [Track]], against target: Track) -> [Track] {
+    private static func rank(groups: [SourceID: [Track]], against target: Track, maxIntervalDiff: Int) -> [Track] {
         let fName = filterStr(target.name).lowercased()
         let fSinger = filterStr(sortSingle(target.singer)).lowercased()
         let fAlbum = filterStr(target.albumName ?? "").lowercased()
         let fInterval = getInterval(target.duration)
         let isEqualsInterval: (Int) -> Bool = { intv in
-            abs((fInterval == 0 ? intv : fInterval) - (intv == 0 ? fInterval : intv)) < 5
+            abs((fInterval == 0 ? intv : fInterval) - (intv == 0 ? fInterval : intv)) <= maxIntervalDiff
         }
         let isIncludesName: (String) -> Bool = { name in
             fName.contains(name) || name.contains(fName)

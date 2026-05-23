@@ -33,6 +33,10 @@
 		9F9F90BB2FAB834800FC275C /* Exceptions for "walkman" folder in "walkman" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Frameworks/libflac/src/deduplication/bitreader_read_rice_signed_block.c,
+				Frameworks/libflac/src/deduplication/lpc_compute_autocorrelation_intrin_neon.c,
+				Frameworks/libflac/src/deduplication/lpc_compute_autocorrelation_intrin_sse2.c,
+				Frameworks/libflac/src/deduplication/lpc_compute_autocorrelation_intrin.c,
 				Info.plist,
 			);
 			target = 9F9F90942FAB834600FC275C /* walkman */;
@@ -292,7 +296,12 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = G5PXDM7897;
 				ENABLE_PREVIEWS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"HAVE_CONFIG_H=1",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/walkman/Frameworks/libflac/include";
 				INFOPLIST_FILE = walkman/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -327,7 +336,12 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = G5PXDM7897;
 				ENABLE_PREVIEWS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"HAVE_CONFIG_H=1",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/walkman/Frameworks/libflac/include";
 				INFOPLIST_FILE = walkman/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

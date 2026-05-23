@@ -16,6 +16,7 @@ final class PlaybackEngine: ObservableObject {
     @Published var loopMode: LoopMode = .all
     @Published var shuffle: Bool = false
     @Published var lastError: String?  // surfaced to UI when URL resolution / playback fails
+    @Published var cascadeNotice: String?  // soft notice when AVPlayer rejected a quality and we auto-downgraded
     @Published private(set) var currentOrigin: ResolveOrigin?  // which mechanism produced the playing URL
     @Published private(set) var currentQuality: Quality?  // actual quality of the playing URL (after cascade)
 
@@ -31,6 +32,13 @@ final class PlaybackEngine: ObservableObject {
     }
 
     private var player: AVPlayer?
+    /// libFLAC-backed player used when AVFoundation rejects a Hi-Res FLAC (-11828).
+    private let hiResPlayer = HiResFLACPlayer()
+    private var usingHiRes = false
+    private var currentURL: URL?
+    private var hiResProgressTimer: Timer?
+    /// Per-track: only attempt the libFLAC path once so a genuinely broken file still cascades.
+    private var triedHiRes = false
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var failObserver: NSObjectProtocol?
@@ -100,6 +108,12 @@ final class PlaybackEngine: ObservableObject {
         currentTrack = asTrack
         currentOrigin = .localFile
         currentQuality = nil
+        // This path skips loadAndPlayCurrent, so reset per-track recovery state here, otherwise
+        // a stale `triedHiRes` from the previous song would block the libFLAC fallback.
+        qualityCap = nil
+        triedQualities = []
+        triedHiRes = false
+        cascadeNotice = nil
         startPlayback(url: url)
     }
 
@@ -124,6 +138,8 @@ final class PlaybackEngine: ObservableObject {
         if currentTrack?.id != track.id {
             qualityCap = nil
             triedQualities = []
+            cascadeNotice = nil
+            triedHiRes = false
         }
         if let q = currentQuality { triedQualities.insert(q) }
         currentTrack = track
@@ -142,12 +158,23 @@ final class PlaybackEngine: ObservableObject {
                 currentOrigin = resolved.origin
                 currentQuality = resolved.quality
                 if let warning = resolved.warning {
-                    lastError = warning   // ErrorBanner shows it as an orange notice
+                    // Informational (换源/降级), not a real error — gated by the debug-notices toggle.
+                    cascadeNotice = warning
                 }
             } else {
                 throw NSError(domain: "Playback", code: -1, userInfo: [NSLocalizedDescriptionKey: "No URL resolver"])
             }
-            startPlayback(url: url)
+            // Debug: force the libFLAC path for FLAC-family qualities without waiting for AVPlayer
+            // to reject the file. The simulator's AVFoundation often decodes 24-bit FLAC fine
+            // (it uses the macOS codec stack), so -11828 never fires there — this lets us exercise
+            // the libFLAC pipeline on the simulator. `triedHiRes` guards against re-entry on cascade.
+            if UserDefaults.standard.bool(forKey: "debug.forceHiRes"), !triedHiRes,
+               currentQuality == .flac || currentQuality == .flac24 {
+                triedHiRes = true
+                await tryHiResPlayback(url: url)
+            } else {
+                startPlayback(url: url)
+            }
         } catch {
             isBuffering = false
             isPlaying = false
@@ -158,6 +185,11 @@ final class PlaybackEngine: ObservableObject {
 
     private func startPlayback(url: URL) {
         cleanupPlayer()
+        // Hand control back to AVPlayer (HiRes path re-enables itself on -11828).
+        hiResPlayer.stop()
+        stopHiResProgressTimer()
+        usingHiRes = false
+        currentURL = url
         print("[PlaybackEngine] startPlayback url=\(url.absoluteString)")
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
@@ -179,11 +211,27 @@ final class PlaybackEngine: ObservableObject {
                     // Recover from "format not recognised" by trying a lower quality.
                     // -11828 = AVErrorFileFormatNotRecognized (Hi-Res FLAC etc. AVFoundation rejects).
                     let isFormatErr = (nsErr?.domain == AVFoundationErrorDomain) && (nsErr?.code == -11828 || nsErr?.code == -11829)
+                    if isFormatErr, !self.triedHiRes, let url = self.currentURL {
+                        // libFLAC decodes 24-bit FLAC that AVFoundation rejects, on the *same* URL.
+                        // Works for both script-resolved tracks AND pasted direct URLs (source .local).
+                        // If the stream isn't really FLAC, the decoder fails and we fall through to
+                        // the cascade / error below. One attempt per track.
+                        self.triedHiRes = true
+                        print("[PlaybackEngine] AVPlayer rejected format, trying libFLAC decoder")
+                        Task { await self.tryHiResPlayback(url: url) }
+                        return
+                    }
+                    // Cascade down to a lower quality and re-resolve — only meaningful for script
+                    // sources (direct/local URLs have no resolver or alternate qualities).
                     if isFormatErr, let track = self.currentTrack, track.source != .local,
                        let nextQ = self.nextLowerQuality(below: self.currentQuality ?? .flac24, supportedBy: track),
                        !self.triedQualities.contains(nextQ) {
+                        let fromQ = self.currentQuality?.displayName ?? "Hi-Res"
                         print("[PlaybackEngine] format not supported at \(self.currentQuality?.rawValue ?? "?"), retrying at \(nextQ.rawValue)")
                         self.qualityCap = nextQ
+                        // Surface to UI so the user actually sees the cascade triggering.
+                        // Uses its own field (not lastError) so loadAndPlayCurrent's reset doesn't wipe it.
+                        self.cascadeNotice = "iOS 无法解码 \(fromQ),已自动降级到 \(nextQ.displayName)"
                         Task { await self.loadAndPlayCurrent() }
                         return
                     }
@@ -273,12 +321,69 @@ final class PlaybackEngine: ObservableObject {
         player = nil
     }
 
+    /// Called when AVPlayer rejects a FLAC file. Tears down AVPlayer and decodes via libFLAC.
+    /// On success the rest of the UI keeps working (progress driven by a timer instead of KVO);
+    /// on failure we fall back to the quality cascade.
+    private func tryHiResPlayback(url: URL) async {
+        cleanupPlayer()
+        isBuffering = true
+        do {
+            try await hiResPlayer.play(url: url)
+            usingHiRes = true
+            isBuffering = false
+            isPlaying = true
+            duration = hiResPlayer.duration
+            cascadeNotice = "iOS 原生解码失败,已用内置 Hi-Res 解码器(libFLAC)播放"
+            hiResPlayer.onPlaybackEnded = { [weak self] in
+                Task { @MainActor in self?.handleItemEnded() }
+            }
+            startHiResProgressTimer()
+            updateNowPlayingInfo()
+            loadArtwork()
+        } catch {
+            print("[PlaybackEngine] libFLAC decode failed: \(error)")
+            usingHiRes = false
+            // Fall back to the quality cascade — but only for script sources. A direct/local URL
+            // (e.g. 贴 URL 播放) has no resolver and isn't in the queue, so loadAndPlayCurrent
+            // can't re-fetch it; just surface the error.
+            if let track = currentTrack, track.source != .local,
+               let nextQ = nextLowerQuality(below: currentQuality ?? .flac24, supportedBy: track),
+               !triedQualities.contains(nextQ) {
+                qualityCap = nextQ
+                cascadeNotice = "Hi-Res 解码失败,已降级到 \(nextQ.displayName)"
+                await loadAndPlayCurrent()
+            } else {
+                isBuffering = false
+                isPlaying = false
+                lastError = "无法播放(含 Hi-Res 解码): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func startHiResProgressTimer() {
+        hiResProgressTimer?.invalidate()
+        hiResProgressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.usingHiRes else { return }
+                self.currentTime = self.hiResPlayer.currentTime
+                self.duration = self.hiResPlayer.duration
+                self.isBuffering = false
+                self.updateNowPlayingTime()
+            }
+        }
+    }
+
+    private func stopHiResProgressTimer() {
+        hiResProgressTimer?.invalidate()
+        hiResProgressTimer = nil
+    }
+
     func togglePlayPause() {
         isPlaying ? pause() : resume()
     }
 
     func pause() {
-        player?.pause()
+        if usingHiRes { hiResPlayer.pause() } else { player?.pause() }
         isPlaying = false
         updateNowPlayingTime()
     }
@@ -289,14 +394,18 @@ final class PlaybackEngine: ObservableObject {
             Task { await loadAndPlayCurrent() }
             return
         }
-        player?.play()
+        if usingHiRes { hiResPlayer.resume() } else { player?.play() }
         isPlaying = true
         updateNowPlayingTime()
     }
 
     func seek(to seconds: Double) {
         let clamped = max(0, min(seconds, duration))
-        player?.seek(to: CMTime(seconds: clamped, preferredTimescale: 600))
+        if usingHiRes {
+            hiResPlayer.seek(to: clamped)
+        } else {
+            player?.seek(to: CMTime(seconds: clamped, preferredTimescale: 600))
+        }
         currentTime = clamped
         updateNowPlayingTime()
     }
@@ -327,7 +436,9 @@ final class PlaybackEngine: ObservableObject {
     private func handleItemEnded() {
         switch loopMode {
         case .one:
-            seek(to: 0); player?.play()
+            seek(to: 0)
+            if usingHiRes { hiResPlayer.resume() } else { player?.play() }
+            isPlaying = true
         case .all:
             next()
         case .off:
@@ -378,6 +489,9 @@ final class PlaybackEngine: ObservableObject {
 
     func clearQueue() {
         cleanupPlayer()
+        hiResPlayer.stop()
+        stopHiResProgressTimer()
+        usingHiRes = false
         queue = []
         currentTrack = nil
         currentTime = 0

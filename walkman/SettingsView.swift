@@ -20,7 +20,6 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("启动时加载内置脚本", isOn: $settings.loadBundledOnLaunch)
                 Toggle("脚本失败时走内置直连 (非官方)", isOn: $settings.enableDirectFallback)
                 NavigationLink {
                     ScriptManagerView()
@@ -35,7 +34,7 @@ struct SettingsView: View {
             } header: {
                 Text("音源")
             } footer: {
-                Text("脚本失败时是否回落到内置直连(只支持酷我/网易云)。如果你的脚本指向真正可用的 API 服务器,可关闭此项严格走脚本;默认 v4 脚本指向的 88.lxmusic.世界 仅提供版本检查,实际 URL 解析需要靠这里")
+                Text("脚本失败或未配置音源时,回落到内置直连(仅支持酷我/网易云)。如果你添加的音源能正常解析,可关闭此项严格走脚本")
             }
 
             if !sources.loadedScripts.isEmpty {
@@ -77,15 +76,26 @@ struct SettingsView: View {
                 Text("使用 iCloud Key-Value 同步歌单和设置(脚本本身不上传)")
             }
 
+            Section {
+                Toggle("显示调试提示", isOn: $settings.showDebugNotices)
+            } header: {
+                Text("调试")
+            } footer: {
+                Text("开启后,播放时会显示「换源播放」「音质降级」「使用内置 Hi-Res 解码」等提示横幅。真正的播放错误始终显示,不受此开关影响")
+            }
+
             Section("关于") {
-                LabeledContent("版本", value: "0.2.0")
-                LabeledContent("基于", value: "lx-music v4 协议")
-                Text("基于 lx-music 移动版协议复刻的 iOS 客户端,使用 SwiftUI + JavaScriptCore + AVFoundation 实现")
-                    .font(.caption).foregroundColor(.secondary)
+                LabeledContent("版本", value: appVersion)
             }
         }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.large)
+    }
+
+    private var appVersion: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(v) (\(b))"
     }
 
     private func iconForQuality(_ q: Quality) -> String {

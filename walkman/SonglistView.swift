@@ -3,7 +3,7 @@ import SwiftUI
 /// Browse recommended playlists per platform; tap → detail with songs.
 struct SonglistView: View {
     @AppStorage("ui.songlistSource") private var selectedSourceRaw: String = SourceID.kw.rawValue
-    @State private var order: SonglistOrder = .hot
+    @State private var orderID: String = ""
     @State private var playlists: [SonglistInfo] = []
     @State private var isLoading = false
     @State private var error: String?
@@ -16,29 +16,24 @@ struct SonglistView: View {
     }
 
     private var supportedSources: [SourceID] { Songlists.all.map { $0.source } }
+    private var currentOrders: [SonglistOrder] { Songlists.service(for: selectedSource)?.orders ?? [] }
+    private var currentOrder: SonglistOrder {
+        currentOrders.first { $0.id == orderID } ?? currentOrders.first ?? SonglistOrder(id: "hot", name: "最热")
+    }
+    private var orderBinding: Binding<SonglistOrder> {
+        Binding(get: { currentOrder }, set: { orderID = $0.id })
+    }
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                if supportedSources.count > 1 {
-                    Picker("源", selection: selectedSourceBinding) {
-                        ForEach(supportedSources, id: \.self) { src in
-                            Text(src.displayName).tag(src)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                Picker("排序", selection: $order) {
-                    ForEach(SonglistOrder.allCases, id: \.self) { o in
-                        Text(o.displayName).tag(o)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 180)
+        VStack(spacing: DS.Spacing.s) {
+            if supportedSources.count > 1 {
+                ChipBar(items: supportedSources, title: { $0.displayName }, selection: selectedSourceBinding)
+                    .padding(.top, DS.Spacing.s)
             }
-            .padding(.horizontal, DS.Spacing.l)
-            .padding(.top, DS.Spacing.s)
+            if currentOrders.count > 1 {
+                ChipBar(items: currentOrders, title: { $0.name }, selection: orderBinding)
+            }
 
             ScrollView {
                 if isLoading && playlists.isEmpty {
@@ -65,24 +60,25 @@ struct SonglistView: View {
         .navigationDestination(for: SonglistInfo.self) { info in
             SonglistDetailView(info: info)
         }
-        .task(id: SortKey(source: selectedSource, order: order)) {
+        .task(id: SortKey(source: selectedSource, order: currentOrder.id)) {
             await load()
         }
     }
 
     private struct SortKey: Hashable {
         let source: SourceID
-        let order: SonglistOrder
+        let order: String
     }
 
     private func load() async {
         playlists = []
         error = nil
+        let svcOrder = currentOrder
         guard let svc = Songlists.service(for: selectedSource) else { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            playlists = try await svc.fetchRecommended(order: order, page: 1)
+            playlists = try await svc.fetchRecommended(order: svcOrder, page: 1)
         } catch {
             self.error = error.localizedDescription
         }
@@ -227,8 +223,11 @@ struct SonglistDetailView: View {
                     Button {
                         playback.play(track: detail.tracks[0], in: detail.tracks, startIndex: 0)
                     } label: {
-                        Label("播放全部", systemImage: "play.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                        HStack(spacing: 5) {
+                            Image(systemName: "play.fill")
+                            Text("播放全部")
+                        }
+                        .font(.system(size: 13, weight: .semibold))
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)

@@ -27,6 +27,8 @@ nonisolated enum Boards {
     static let all: [any BoardService] = [
         KuwoBoardService(),
         NetEaseBoardService(),
+        KugouBoardService(),
+        QQBoardService(),
     ]
     static func service(for source: SourceID) -> (any BoardService)? {
         all.first { $0.source == source }
@@ -243,6 +245,233 @@ nonisolated struct NetEaseBoardService: BoardService {
             duration: duration,
             picURL: pic,
             qualities: qs
+        )
+    }
+}
+
+// MARK: - Kugou
+
+/// Mirrors musicSdk/kg/leaderboard.js. Songs via `mobilecdnbj.kugou.com/api/v3/rank/song`.
+nonisolated struct KugouBoardService: BoardService {
+    let source: SourceID = .kg
+
+    let list: [BoardInfo] = [
+        BoardInfo(id: "kg__8888",  source: .kg, bangid: "8888",  name: "TOP500"),
+        BoardInfo(id: "kg__6666",  source: .kg, bangid: "6666",  name: "飙升榜"),
+        BoardInfo(id: "kg__23784", source: .kg, bangid: "23784", name: "网络红歌榜"),
+        BoardInfo(id: "kg__52144", source: .kg, bangid: "52144", name: "抖音热歌榜"),
+        BoardInfo(id: "kg__52767", source: .kg, bangid: "52767", name: "快手热歌榜"),
+        BoardInfo(id: "kg__24971", source: .kg, bangid: "24971", name: "DJ热歌榜"),
+        BoardInfo(id: "kg__44412", source: .kg, bangid: "44412", name: "说唱先锋榜"),
+        BoardInfo(id: "kg__31308", source: .kg, bangid: "31308", name: "内地榜"),
+        BoardInfo(id: "kg__33160", source: .kg, bangid: "33160", name: "电音榜"),
+        BoardInfo(id: "kg__33161", source: .kg, bangid: "33161", name: "古风新歌榜"),
+        BoardInfo(id: "kg__33165", source: .kg, bangid: "33165", name: "粤语金曲榜"),
+        BoardInfo(id: "kg__33166", source: .kg, bangid: "33166", name: "欧美金曲榜"),
+        BoardInfo(id: "kg__33163", source: .kg, bangid: "33163", name: "影视金曲榜"),
+        BoardInfo(id: "kg__31311", source: .kg, bangid: "31311", name: "韩国榜"),
+        BoardInfo(id: "kg__31312", source: .kg, bangid: "31312", name: "日本榜"),
+    ]
+
+    func fetchBoards() async -> [BoardInfo] {
+        // `v5/rank/list` returns every board with an `imgurl` ({size} template). Merge covers
+        // into our curated list by bangid.
+        let urlStr = "http://mobilecdnbj.kugou.com/api/v5/rank/list?version=9108&plat=0&showtype=2&parentid=0&apiver=6&area_code=1&withsong=1"
+        guard let url = URL(string: urlStr) else { return list }
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 10
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let d = json["data"] as? [String: Any],
+              let info = d["info"] as? [[String: Any]] else { return list }
+        var picByBangid: [String: String] = [:]
+        for b in info {
+            let bangid = (b["rankid"] as? Int).map(String.init) ?? (b["rankid"] as? String) ?? ""
+            let raw = (b["imgurl"] as? String) ?? (b["img_cover"] as? String) ?? ""
+            if !bangid.isEmpty, !raw.isEmpty {
+                picByBangid[bangid] = raw.replacingOccurrences(of: "{size}", with: "240")
+            }
+        }
+        return list.map { board in
+            var b = board
+            b.picURL = picByBangid[board.bangid] ?? board.picURL
+            return b
+        }
+    }
+
+    func fetchTracks(bangid: String, page: Int) async throws -> [Track] {
+        let urlStr = "http://mobilecdnbj.kugou.com/api/v3/rank/song?version=9108&ranktype=1&plat=0&pagesize=100&area_code=1&page=\(page)&rankid=\(bangid)&with_res_tag=0&show_portrait_mv=1"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let d = json["data"] as? [String: Any],
+              let info = d["info"] as? [[String: Any]] else { return [] }
+        return info.compactMap(buildTrack)
+    }
+
+    private func buildTrack(_ d: [String: Any]) -> Track? {
+        let hash = (d["hash"] as? String) ?? ""
+        guard !hash.isEmpty else { return nil }
+        let audioId: String
+        if let i = d["audio_id"] as? Int { audioId = String(i) }
+        else if let s = d["audio_id"] as? String, !s.isEmpty { audioId = s }
+        else { audioId = hash }
+        let name = decode((d["songname"] as? String) ?? "未知")
+        let authors = (d["authors"] as? [[String: Any]]) ?? []
+        let singer = authors.compactMap { $0["author_name"] as? String }.joined(separator: "、")
+        let album = (d["remark"] as? String).map(decode)
+        let albumId = (d["album_id"] as? String) ?? (d["album_id"] as? Int).map(String.init)
+        let duration = (d["duration"] as? Int) ?? Int((d["duration"] as? String) ?? "0")
+
+        var qs: [Quality] = []
+        if (d["filesize"] as? Int).map({ $0 != 0 }) ?? false { qs.append(.k128) }
+        if (d["320filesize"] as? Int).map({ $0 != 0 }) ?? false { qs.append(.k320) }
+        if (d["sqfilesize"] as? Int).map({ $0 != 0 }) ?? false { qs.append(.flac) }
+        if (d["filesize_high"] as? Int).map({ $0 != 0 }) ?? false { qs.append(.flac24) }
+        if qs.isEmpty { qs = [.k128] }
+
+        var extras: [String: String] = ["hash": hash]
+        if let albumId { extras["albumId"] = albumId }
+        // Cover: use the first author's sizable avatar ({size} template).
+        let pic: String? = (authors.first?["sizable_avatar"] as? String).flatMap {
+            $0.isEmpty ? nil : $0.replacingOccurrences(of: "{size}", with: "150")
+        }
+        return Track(
+            id: Track.makeID(source: .kg, songmid: audioId),
+            name: name,
+            singer: singer,
+            albumName: album,
+            albumId: albumId,
+            source: .kg,
+            songmid: audioId,
+            duration: (duration ?? 0) > 0 ? duration : nil,
+            picURL: pic,
+            qualities: qs,
+            extras: extras
+        )
+    }
+
+    private func decode(_ s: String) -> String {
+        s.replacingOccurrences(of: "&nbsp;", with: " ").replacingOccurrences(of: "&amp;", with: "&")
+    }
+}
+
+// MARK: - QQ Music
+
+/// Mirrors musicSdk/tx/leaderboard.js. Songs via `u.y.qq.com/cgi-bin/musicu.fcg` toplist GetDetail.
+nonisolated struct QQBoardService: BoardService {
+    let source: SourceID = .tx
+
+    let list: [BoardInfo] = [
+        BoardInfo(id: "tx__4",  source: .tx, bangid: "4",  name: "流行指数榜"),
+        BoardInfo(id: "tx__26", source: .tx, bangid: "26", name: "热歌榜"),
+        BoardInfo(id: "tx__27", source: .tx, bangid: "27", name: "新歌榜"),
+        BoardInfo(id: "tx__62", source: .tx, bangid: "62", name: "飙升榜"),
+        BoardInfo(id: "tx__28", source: .tx, bangid: "28", name: "网络歌曲榜"),
+        BoardInfo(id: "tx__60", source: .tx, bangid: "60", name: "抖快榜"),
+        BoardInfo(id: "tx__5",  source: .tx, bangid: "5",  name: "内地榜"),
+        BoardInfo(id: "tx__3",  source: .tx, bangid: "3",  name: "欧美榜"),
+        BoardInfo(id: "tx__59", source: .tx, bangid: "59", name: "香港地区榜"),
+        BoardInfo(id: "tx__16", source: .tx, bangid: "16", name: "韩国榜"),
+        BoardInfo(id: "tx__17", source: .tx, bangid: "17", name: "日本榜"),
+        BoardInfo(id: "tx__65", source: .tx, bangid: "65", name: "国风热歌榜"),
+        BoardInfo(id: "tx__58", source: .tx, bangid: "58", name: "说唱榜"),
+        BoardInfo(id: "tx__29", source: .tx, bangid: "29", name: "影视金曲榜"),
+        BoardInfo(id: "tx__63", source: .tx, bangid: "63", name: "DJ舞曲榜"),
+    ]
+
+    func fetchBoards() async -> [BoardInfo] {
+        // `fcg_myqq_toplist.fcg` returns topList[] with `id` + `picUrl`. Merge covers by bangid.
+        let urlStr = "https://c.y.qq.com/v8/fcg-bin/fcg_myqq_toplist.fcg?g_tk=1928093487&inCharset=utf-8&outCharset=utf-8&notice=0&format=json&uin=0&needNewCode=1&platform=h5"
+        guard let url = URL(string: urlStr) else { return list }
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 10
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let d = json["data"] as? [String: Any],
+              let topList = d["topList"] as? [[String: Any]] else { return list }
+        var picByBangid: [String: String] = [:]
+        for b in topList {
+            let bangid = (b["id"] as? Int).map(String.init) ?? (b["id"] as? String) ?? ""
+            let pic = (b["picUrl"] as? String) ?? ""
+            if !bangid.isEmpty, !pic.isEmpty { picByBangid[bangid] = pic }
+        }
+        return list.map { board in
+            var b = board
+            b.picURL = picByBangid[board.bangid] ?? board.picURL
+            return b
+        }
+    }
+
+    func fetchTracks(bangid: String, page: Int) async throws -> [Track] {
+        guard let url = URL(string: "https://u.y.qq.com/cgi-bin/musicu.fcg") else { return [] }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        let body: [String: Any] = [
+            "toplist": [
+                "module": "musicToplist.ToplistInfoServer",
+                "method": "GetDetail",
+                "param": ["topid": Int(bangid) ?? 0, "num": 100],
+            ],
+            "comm": ["uin": 0, "format": "json", "ct": 20, "cv": 1859],
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let toplist = json["toplist"] as? [String: Any],
+              let tdata = toplist["data"] as? [String: Any],
+              let songs = tdata["songInfoList"] as? [[String: Any]] else { return [] }
+        return songs.compactMap(QQTrackBuilder.build)
+    }
+}
+
+/// Shared QQ track builder for boards + songlists (mirrors QQMusicCatalogService.build).
+nonisolated enum QQTrackBuilder {
+    static func build(_ d: [String: Any]) -> Track? {
+        let mid = (d["mid"] as? String) ?? ""
+        guard !mid.isEmpty else { return nil }
+        let name = (d["name"] as? String) ?? (d["title"] as? String) ?? "未知"
+        let singers = (d["singer"] as? [[String: Any]]) ?? []
+        let singer = singers.compactMap { $0["name"] as? String }.joined(separator: " / ")
+        let album = d["album"] as? [String: Any]
+        let albumName = album?["name"] as? String
+        let albumMid = album?["mid"] as? String
+        let albumId = album?["id"].map { String(describing: $0) }
+        let interval = d["interval"] as? Int
+        let file = d["file"] as? [String: Any] ?? [:]
+        var qs: [Quality] = []
+        if (file["size_128mp3"] as? Int).map({ $0 > 0 }) ?? false { qs.append(.k128) }
+        if (file["size_320mp3"] as? Int).map({ $0 > 0 }) ?? false { qs.append(.k320) }
+        if (file["size_flac"] as? Int).map({ $0 > 0 }) ?? false { qs.append(.flac) }
+        if (file["size_hires"] as? Int).map({ $0 > 0 }) ?? false { qs.append(.flac24) }
+        if qs.isEmpty { qs = [.k128] }
+        var extras: [String: String] = [:]
+        if let m = albumMid, !m.isEmpty { extras["albumMid"] = m }
+        if let smm = file["media_mid"] as? String, !smm.isEmpty { extras["strMediaMid"] = smm }
+        if let sid = d["id"].map({ String(describing: $0) }) { extras["songId"] = sid }
+        let picURL: String? = (albumMid?.isEmpty == false)
+            ? "https://y.gtimg.cn/music/photo_new/T002R300x300M000\(albumMid!).jpg"
+            : nil
+        return Track(
+            id: Track.makeID(source: .tx, songmid: mid),
+            name: name,
+            singer: singer.isEmpty ? "未知" : singer,
+            albumName: albumName?.isEmpty == false ? albumName : nil,
+            albumId: albumId,
+            source: .tx,
+            songmid: mid,
+            duration: interval,
+            picURL: picURL,
+            qualities: qs,
+            extras: extras
         )
     }
 }

@@ -59,6 +59,40 @@ struct SourceChip: View {
     }
 }
 
+// MARK: - Horizontal chip selector
+
+/// A horizontally-scrolling row of selectable pills. Use when there are too many options
+/// for a segmented control (e.g. 4 platforms, or 5 sort categories).
+struct ChipBar<T: Hashable>: View {
+    let items: [T]
+    let title: (T) -> String
+    @Binding var selection: T
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(items, id: \.self) { item in
+                    let on = item == selection
+                    Text(title(item))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(on ? .white : .primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule().fill(on ? Color.accentColor : Color(.secondarySystemBackground))
+                        )
+                        .contentShape(Capsule())
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.15)) { selection = item }
+                        }
+                }
+            }
+            .padding(.horizontal, DS.Spacing.l)
+            .padding(.vertical, 2)
+        }
+    }
+}
+
 // MARK: - Quality badge
 
 /// Mirrors lx-music-mobile's `useQualityTag` (components/OnlineList/ListItem.tsx#15):

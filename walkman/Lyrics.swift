@@ -106,6 +106,13 @@ final class LyricsFetcher {
             cache[track.id] = lines
             return lines
         }
+        // Cross-source: borrow lyrics from the same song on another platform (same name+singer,
+        // duration within 10s). Cached under the *original* track id so it sticks next time.
+        if let lines = await tryOtherSources(track: track, sources: sources) {
+            print("[Lyrics] from other-source: \(lines.count) lines, first 3: \(lines.prefix(3).map { $0.text })")
+            cache[track.id] = lines
+            return lines
+        }
         print("[Lyrics] no lyric for \(track.id)")
         return []
     }
@@ -121,6 +128,25 @@ final class LyricsFetcher {
             }
         } catch {
             print("[Lyrics] script lyric failed: \(error.localizedDescription)")
+        }
+        return nil
+    }
+
+    /// Find the same song on other platforms and borrow its lyrics. Tries each candidate's
+    /// direct lyric API first (most reliable), then its script. Duration must be within 10s.
+    private func tryOtherSources(track: Track, sources: SourceManager) async -> [LyricLine]? {
+        let candidates = await OtherSourceFinder.findMatches(for: track, maxIntervalDiff: 10)
+        for alt in candidates.prefix(4) {
+            // findMatches already filters by interval, but double-check when both have durations.
+            if let d1 = track.duration, let d2 = alt.duration, d1 > 0, d2 > 0, abs(d1 - d2) > 10 { continue }
+            if let lines = await tryFallback(track: alt) {
+                print("[Lyrics] cross-source hit \(alt.source.rawValue)/\(alt.songmid) (\(alt.name) - \(alt.singer))")
+                return lines
+            }
+            if let lines = await tryScript(track: alt, sources: sources) {
+                print("[Lyrics] cross-source hit (script) \(alt.source.rawValue)/\(alt.songmid)")
+                return lines
+            }
         }
         return nil
     }

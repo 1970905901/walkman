@@ -66,26 +66,6 @@ final class SourceManager: ObservableObject {
         }
     }
 
-    /// Bundled lx-music v4 source — auto-loaded on launch as the "built-in" source.
-    func loadBundledSource() async {
-        guard let url = Bundle.main.url(forResource: "builtin-lx-source-v4", withExtension: "js"),
-              let raw = try? String(contentsOf: url, encoding: .utf8) else {
-            lastError = "未找到内置脚本"
-            return
-        }
-        let bundled = UserScript(
-            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
-            name: "内置音源 v4",
-            description: "lx-music 默认 v4 音源",
-            version: "4.0.0",
-            author: "lx-music",
-            homepage: "https://github.com/lyswhut/lx-music-mobile",
-            rawScript: raw,
-            enabled: true
-        )
-        await load(script: bundled)
-    }
-
     func load(script: UserScript) async {
         isLoading = true
         defer { isLoading = false }
@@ -120,6 +100,15 @@ final class SourceManager: ObservableObject {
         }
     }
 
+    /// All loaded scripts that support `source` + `action`, in load order. Used to retry a song
+    /// across every configured music source before giving up / switching platforms.
+    private func pickScripts(for source: SourceID, action: String) -> [LoadedScript] {
+        loadedScripts.filter { ls in
+            guard let cap = ls.capabilities.sources[source] else { return false }
+            return cap.actions.contains(action)
+        }
+    }
+
     /// Resolve a track URL — mirrors lx-music-mobile `handleGetOnlineMusicUrl`:
     ///   1) Try the user script for this source.
     ///   2) On failure, search other platforms for the same song and try those.
@@ -127,20 +116,43 @@ final class SourceManager: ObservableObject {
     /// Returns both the URL and which mechanism produced it so the UI can be transparent.
     func resolveMusicURL(track: Track, quality: Quality? = nil) async throws -> ResolvedTrack {
         let preferred = quality ?? .k320
-        // 1) Try the script on the original source.
-        if let ls = pickScript(for: track.source, action: "musicUrl") {
-            let q = SourceManager.pickPlayQuality(
+        // 1) Try the script on the original source. If the backend rejects the chosen quality
+        //    (lxmusic's API server often only carries a subset), cascade down on the same script
+        //    before resorting to other-source.  This is stricter than lx-music-mobile (which
+        //    jumps straight to other-source on any failure) but matches the spirit of getPlayQuality
+        //    while accounting for backend-level gaps that capability lists don't surface.
+        //    Try EVERY loaded script that supports this platform, in load order — so if the user
+        //    added several music sources, a song that one source can't deliver is retried on the
+        //    next before we resort to switching platforms.
+        let scripts = pickScripts(for: track.source, action: "musicUrl")
+        for (scriptIdx, ls) in scripts.enumerated() {
+            let scriptQs = Set(ls.capabilities.sources[track.source]?.qualities ?? [])
+            let first = SourceManager.pickPlayQuality(
                 preferred: preferred,
                 trackQualities: Set(track.qualities),
-                scriptQualities: Set(ls.capabilities.sources[track.source]?.qualities ?? [])
+                scriptQualities: scriptQs
             )
-            print("[SourceManager] script musicUrl source=\(track.source.rawValue) songmid=\(track.songmid) prefer=\(preferred.rawValue) → effective=\(q.rawValue)")
-            do {
-                let url = try await resolveViaScript(track: track, quality: q, loaded: ls)
-                return ResolvedTrack(url: url, origin: .script(name: ls.script.name), quality: q, warning: nil)
-            } catch {
-                print("[SourceManager] script musicUrl failed (\(error.localizedDescription)) — trying other sources")
+            print("[SourceManager] script[\(scriptIdx)] '\(ls.script.name)' musicUrl source=\(track.source.rawValue) songmid=\(track.songmid) prefer=\(preferred.rawValue) → effective=\(first.rawValue)")
+            // Build the cascade — every quality at or below the chosen one that both
+            // track and script claim to support.
+            let cascade = SourceManager.qualityCascade(from: first, trackQualities: Set(track.qualities), scriptQualities: scriptQs)
+            for (idx, q) in cascade.enumerated() {
+                do {
+                    let url = try await resolveViaScript(track: track, quality: q, loaded: ls)
+                    let warn: String?
+                    if scriptIdx > 0 {
+                        warn = "已切换到音源「\(ls.script.name)」"
+                    } else if idx > 0 {
+                        warn = "\(first.displayName) 远程不支持,已降级到 \(q.displayName)"
+                    } else {
+                        warn = nil
+                    }
+                    return ResolvedTrack(url: url, origin: .script(name: ls.script.name), quality: q, warning: warn)
+                } catch {
+                    print("[SourceManager] script '\(ls.script.name)' @\(q.rawValue) failed (\(error.localizedDescription))")
+                }
             }
+            print("[SourceManager] script '\(ls.script.name)' exhausted\(scriptIdx + 1 < scripts.count ? " — trying next source" : " — trying other platforms")")
         }
         // 2) lx-music's `getOtherSource`: search the same song name+singer on EVERY other
         // platform, then try the script on each in match-quality order. First playable wins.
@@ -208,6 +220,27 @@ final class SourceManager: ObservableObject {
             }
         }
         return .k128
+    }
+
+    /// Cascade for backend retries: starting at `first` (already the result of pickPlayQuality),
+    /// list every lower quality both track and script claim to support, ending at .k128.
+    /// Used when the user-script's backend rejects a specific quality even though it advertises
+    /// support (e.g. lxmusic API server returning "internal server error" for kw flac24bit).
+    nonisolated static func qualityCascade(from first: Quality,
+                                            trackQualities: Set<Quality>,
+                                            scriptQualities: Set<Quality>) -> [Quality] {
+        let full: [Quality] = [.flac24, .flac, .k320, .k128]
+        guard let startIdx = full.firstIndex(of: first) else { return [first] }
+        var out: [Quality] = []
+        for q in full[startIdx...] {
+            // k128 is the universal floor — try it even if not in scriptQualities since
+            // the bundled lx backend always carries 128k for the supported sources.
+            if q == .k128 || (trackQualities.contains(q) && scriptQualities.contains(q)) {
+                out.append(q)
+            }
+        }
+        if out.isEmpty { out = [first] }
+        return out
     }
 
     private func resolveViaScript(track: Track, quality: Quality, loaded ls: LoadedScript) async throws -> URL {

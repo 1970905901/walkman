@@ -7,6 +7,7 @@ struct walkmanApp: App {
     @StateObject private var playlists = PlaylistStore()
     @StateObject private var scripts = ScriptStore()
     @StateObject private var settings = SettingsStore()
+    @StateObject private var downloads = DownloadStore.shared
 
     var body: some Scene {
         WindowGroup {
@@ -16,21 +17,28 @@ struct walkmanApp: App {
                 .environmentObject(playlists)
                 .environmentObject(scripts)
                 .environmentObject(settings)
+                .environmentObject(downloads)
                 .task { await bootstrap() }
         }
     }
 
     private func bootstrap() async {
         sources.fallbackEnabled = settings.enableDirectFallback
-        playback.setURLResolver { [sources, settings, playback] track in
+        // Downloads reuse the same URL resolution as playback (script → other-source → direct).
+        downloads.urlResolver = { [sources] track, quality in
+            try await sources.resolveMusicURL(track: track, quality: quality).url
+        }
+        playback.setURLResolver { [sources, settings, playback, downloads] track in
+            // Prefer a local downloaded file — plays offline and skips the network entirely.
+            if let local = await MainActor.run(body: { downloads.localURL(for: track.id) }) {
+                let q = await MainActor.run { downloads.quality(for: track.id) } ?? .k320
+                return ResolvedTrack(url: local, origin: .localFile, quality: q, warning: nil)
+            }
             sources.fallbackEnabled = settings.enableDirectFallback
             // `qualityCap` is set by PlaybackEngine when AVPlayer rejects a higher format
             // (e.g. 24-bit Hi-Res FLAC). When set, we resolve at the lower quality instead.
             let q = await MainActor.run { playback.qualityCap } ?? settings.preferredQuality
             return try await sources.resolveMusicURL(track: track, quality: q)
-        }
-        if settings.loadBundledOnLaunch {
-            await sources.loadBundledSource()
         }
         for s in scripts.scripts where s.enabled {
             await sources.load(script: s)

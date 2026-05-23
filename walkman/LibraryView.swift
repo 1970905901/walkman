@@ -7,6 +7,7 @@ enum LibraryRoute: Hashable {
 struct LibraryView: View {
     @EnvironmentObject var playlists: PlaylistStore
     @EnvironmentObject var playback: PlaybackEngine
+    @EnvironmentObject var downloads: DownloadStore
     @State private var showCreate = false
     @State private var newName = ""
 
@@ -15,8 +16,13 @@ struct LibraryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.Spacing.l) {
-                quickActions
-                    .padding(.horizontal, DS.Spacing.l)
+                NavigationLink {
+                    DownloadedView()
+                } label: {
+                    downloadedRow
+                        .padding(.horizontal, DS.Spacing.l)
+                }
+                .buttonStyle(.plain)
 
                 Section {
                     LazyVGrid(columns: columns, spacing: 14) {
@@ -52,8 +58,11 @@ struct LibraryView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .topBarLeading) {
                 Button { showCreate = true } label: { Image(systemName: "plus.circle.fill") }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
             }
         }
         .alert("新建歌单", isPresented: $showCreate) {
@@ -67,11 +76,26 @@ struct LibraryView: View {
         }
     }
 
-    private var quickActions: some View {
+    private var downloadedRow: some View {
         HStack(spacing: 12) {
-            QuickActionTile(icon: "link.badge.plus", title: "贴 URL 播放", tint: .accentColor, destination: PlayURLView())
-            QuickActionTile(icon: "doc.text.magnifyingglass", title: "音源脚本", tint: .orange, destination: ScriptManagerView())
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 44, height: 44)
+                .background(LinearGradient(colors: [.accentColor, .accentColor.opacity(0.6)],
+                                           startPoint: .top, endPoint: .bottom),
+                            in: RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("已下载").font(.system(size: 16, weight: .semibold)).foregroundColor(.primary)
+                Text("\(downloads.completedCount) 首 · \(downloads.folders.count) 个子歌单")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
         }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
     }
 
     private func sectionHeader(_ title: String, subtitle: String? = nil) -> some View {
@@ -82,35 +106,6 @@ struct LibraryView: View {
             }
             Spacer()
         }
-    }
-}
-
-private struct QuickActionTile<D: View>: View {
-    let icon: String
-    let title: String
-    let tint: Color
-    let destination: D
-
-    var body: some View {
-        NavigationLink {
-            destination
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(width: 36, height: 36)
-                    .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
-                Spacer()
-            }
-            .padding(.horizontal, 12).padding(.vertical, 12)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -141,7 +136,7 @@ private struct PlaylistCard: View {
     }
 }
 
-private struct CoverMosaic: View {
+struct CoverMosaic: View {
     let urls: [String?]
 
     var body: some View {
@@ -225,8 +220,11 @@ struct PlaylistDetailView: View {
                                         playback.play(track: first, in: tracks, startIndex: 0)
                                     }
                                 } label: {
-                                    Label("播放全部", systemImage: "play.fill")
-                                        .font(.system(size: 13, weight: .semibold))
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "play.fill")
+                                        Text("播放全部")
+                                    }
+                                    .font(.system(size: 13, weight: .semibold))
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
@@ -309,48 +307,3 @@ private extension ArraySlice where Element == String? {
     }
 }
 
-// MARK: - PlayURLView (kept simple, restyled)
-
-struct PlayURLView: View {
-    @EnvironmentObject var playback: PlaybackEngine
-    @State private var url: String = ""
-    @State private var name: String = "URL Track"
-    @State private var artist: String = "未知"
-
-    var body: some View {
-        Form {
-            Section("音频地址") {
-                TextField("https://...", text: $url, axis: .vertical)
-                    .lineLimit(1...4)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-            Section("元数据(可选)") {
-                TextField("歌曲名", text: $name)
-                TextField("歌手", text: $artist)
-            }
-            Section {
-                Button {
-                    guard let u = URL(string: url) else { return }
-                    let t = Track(
-                        id: Track.makeID(source: .local, songmid: url),
-                        name: name.isEmpty ? "URL" : name,
-                        singer: artist.isEmpty ? "未知" : artist,
-                        source: .local, songmid: url
-                    )
-                    playback.playDirectURL(u, asTrack: t)
-                } label: {
-                    HStack {
-                        Spacer()
-                        Label("立即播放", systemImage: "play.circle.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                        Spacer()
-                    }
-                }
-                .disabled(URL(string: url) == nil)
-            }
-        }
-        .navigationTitle("贴 URL 播放")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}

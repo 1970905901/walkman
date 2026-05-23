@@ -19,14 +19,9 @@ struct LeaderboardView: View {
     var body: some View {
         VStack(spacing: 0) {
             if supportedSources.count > 1 {
-                Picker("源", selection: selectedSourceBinding) {
-                    ForEach(supportedSources, id: \.self) { src in
-                        Text(src.displayName).tag(src)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, DS.Spacing.l)
-                .padding(.top, DS.Spacing.s)
+                ChipBar(items: supportedSources, title: { $0.displayName }, selection: selectedSourceBinding)
+                    .padding(.top, DS.Spacing.s)
+                    .padding(.bottom, DS.Spacing.xs)
             }
             if isLoading && boards.isEmpty {
                 ProgressView().padding(.top, 60)
@@ -126,8 +121,11 @@ struct BoardDetailView: View {
                                     Button {
                                         playback.play(track: tracks[0], in: tracks, startIndex: 0)
                                     } label: {
-                                        Label("播放全部", systemImage: "play.fill")
-                                            .font(.system(size: 13, weight: .semibold))
+                                        HStack(spacing: 5) {
+                                            Image(systemName: "play.fill")
+                                            Text("播放全部")
+                                        }
+                                        .font(.system(size: 13, weight: .semibold))
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .controlSize(.small)

@@ -291,6 +291,7 @@ struct SearchView: View {
 
 struct TrackRow: View {
     let track: Track
+    @ObservedObject private var downloads = DownloadStore.shared
     var body: some View {
         HStack(spacing: 12) {
             Artwork(url: track.picURL, size: 48, radius: DS.Radius.small)
@@ -300,6 +301,11 @@ struct TrackRow: View {
                     // Quality tag mirrors lx-music: only show for >= 320k tracks.
                     if let style = QualityBadgeStyle(highestIn: track.qualities) {
                         QualityBadge(style: style)
+                    }
+                    if downloads.isDownloaded(track.id) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.green)
                     }
                 }
                 HStack(spacing: 6) {

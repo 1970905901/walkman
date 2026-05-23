@@ -12,6 +12,8 @@ struct PlayerView: View {
     @AppStorage("debug.showQueue") private var debugShowQueue: Bool = false
     @State private var lyrics: [LyricLine] = []
     @State private var loadingLyrics = false
+    @State private var trackToFavorite: Track?
+    @State private var trackToDownload: Track?
 
     var body: some View {
         ZStack {
@@ -44,6 +46,12 @@ struct PlayerView: View {
             QueueView()
                 .preferredColorScheme(.light)   // sheet stays in normal appearance
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $trackToFavorite) { track in
+            AddToPlaylistSheet(track: track)
+        }
+        .sheet(item: $trackToDownload) { track in
+            DownloadSheet(track: track)
         }
     }
 
@@ -109,14 +117,19 @@ struct PlayerView: View {
                         .background(.ultraThinMaterial, in: Circle())
                 }
                 Menu {
-                    Button("查看歌词") { page = 1 }
-                    Button("查看封面") { page = 0 }
+                    Button { if let t = playback.currentTrack { trackToFavorite = t } } label: {
+                        Label("收藏", systemImage: "heart")
+                    }
+                    Button { if let t = playback.currentTrack { trackToDownload = t } } label: {
+                        Label("下载", systemImage: "arrow.down.circle")
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 18, weight: .semibold))
                         .frame(width: 36, height: 36)
                         .background(.ultraThinMaterial, in: Circle())
                 }
+                .disabled(playback.currentTrack == nil)
             }
         }
         .foregroundColor(.white)
