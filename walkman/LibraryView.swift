@@ -31,6 +31,13 @@ struct LibraryView: View {
                                 PlaylistCard(playlist: p, tracks: playlists.tracks(in: p))
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    playlists.deletePlaylist(p.id)
+                                } label: {
+                                    Label("删除歌单", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, DS.Spacing.l)
@@ -246,10 +253,7 @@ struct PlaylistDetailView: View {
                             }
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
-                    }
-                    .onDelete { idx in
-                        let ids = idx.map { tracks[$0].id }
-                        playlists.remove(trackIDs: ids, from: p.id)
+                            .trackRowSwipe(t, onRemove: { playlists.remove(trackIDs: [t.id], from: p.id) })
                     }
                 } header: {
                     Text("曲目").font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)

@@ -48,6 +48,10 @@ final class PlaybackEngine: ObservableObject {
     private var statusObservation: NSKeyValueObservation?
     private var bufferEmptyObservation: NSKeyValueObservation?
     private var currentArtwork: MPMediaItemArtwork?
+    /// Timed lyric lines for the current track. Used to show the current line in the now-playing
+    /// album field (CarPlay/lock-screen) instead of the album name, synced to playback position.
+    private var currentLyrics: [LyricLine] = []
+    private var lyricsResolver: ((Track) async -> [LyricLine])?
     /// Per-track cap on quality. When AVPlayer rejects a high-bitrate file (e.g. Kugou's
     /// 24-bit FLAC that AVFoundation can't decode), we cascade down: flac24bit → flac → 320k → 128k.
     /// `nil` means "respect the user's preferred quality" — set when a new track starts.
@@ -55,14 +59,25 @@ final class PlaybackEngine: ObservableObject {
     /// Tracks which qualities we've already tried on the current track so we don't loop.
     private var triedQualities: Set<Quality> = []
     private var resolveURLHandler: ((Track) async throws -> ResolvedTrack)?
+    /// Audio-session lifetime observers (interruptions like calls/Siri/nav prompts, and route
+    /// changes like unplugging CarPlay/headphones). Live for the engine's whole lifetime.
+    private var interruptionObserver: NSObjectProtocol?
+    private var routeChangeObserver: NSObjectProtocol?
+    /// Whether we were playing when an interruption began, so we know to auto-resume after it ends.
+    private var wasPlayingBeforeInterruption = false
 
     init() {
         configureAudioSession()
         setupRemoteCommands()
+        setupAudioSessionObservers()
     }
 
     func setURLResolver(_ resolver: @escaping (Track) async throws -> ResolvedTrack) {
         self.resolveURLHandler = resolver
+    }
+
+    func setLyricsResolver(_ resolver: @escaping (Track) async -> [LyricLine]) {
+        self.lyricsResolver = resolver
     }
 
     private func configureAudioSession() {
@@ -101,6 +116,65 @@ final class PlaybackEngine: ObservableObject {
             guard let evt = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             Task { @MainActor in self?.seek(to: evt.positionTime) }
             return .success
+        }
+    }
+
+    private func setupAudioSessionObservers() {
+        let nc = NotificationCenter.default
+        // Interruptions: phone call, Siri, navigation voice prompt, another audio app, etc.
+        interruptionObserver = nc.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let info = note.userInfo,
+                  let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            // The system tells us via .shouldResume whether it's appropriate to pick back up.
+            let shouldResume: Bool = {
+                guard type == .ended, let optRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt
+                else { return false }
+                return AVAudioSession.InterruptionOptions(rawValue: optRaw).contains(.shouldResume)
+            }()
+            Task { @MainActor [weak self] in
+                self?.handleInterruption(type: type, shouldResume: shouldResume)
+            }
+        }
+        // Route changes: CarPlay / headphones / Bluetooth connected or disconnected.
+        routeChangeObserver = nc.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let info = note.userInfo,
+                  let raw = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
+            Task { @MainActor [weak self] in
+                self?.handleRouteChange(reason: reason)
+            }
+        }
+    }
+
+    private func handleInterruption(type: AVAudioSession.InterruptionType, shouldResume: Bool) {
+        switch type {
+        case .began:
+            // Something took the audio session — remember whether we were playing so we can resume.
+            wasPlayingBeforeInterruption = isPlaying
+            if isPlaying { pause() }
+        case .ended:
+            // Resume only if we were playing before AND the system permits it (e.g. not after the
+            // user manually started a different audio app).
+            if wasPlayingBeforeInterruption && shouldResume {
+                try? AVAudioSession.sharedInstance().setActive(true)
+                resume()
+            }
+            wasPlayingBeforeInterruption = false
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleRouteChange(reason: AVAudioSession.RouteChangeReason) {
+        // The previous output device went away (unplugged CarPlay / pulled out headphones).
+        // Pause instead of suddenly blasting through the iPhone speaker — matches system apps.
+        if reason == .oldDeviceUnavailable, isPlaying {
+            pause()
         }
     }
 
@@ -164,17 +238,7 @@ final class PlaybackEngine: ObservableObject {
             } else {
                 throw NSError(domain: "Playback", code: -1, userInfo: [NSLocalizedDescriptionKey: "No URL resolver"])
             }
-            // Debug: force the libFLAC path for FLAC-family qualities without waiting for AVPlayer
-            // to reject the file. The simulator's AVFoundation often decodes 24-bit FLAC fine
-            // (it uses the macOS codec stack), so -11828 never fires there — this lets us exercise
-            // the libFLAC pipeline on the simulator. `triedHiRes` guards against re-entry on cascade.
-            if UserDefaults.standard.bool(forKey: "debug.forceHiRes"), !triedHiRes,
-               currentQuality == .flac || currentQuality == .flac24 {
-                triedHiRes = true
-                await tryHiResPlayback(url: url)
-            } else {
-                startPlayback(url: url)
-            }
+            startPlayback(url: url)
         } catch {
             isBuffering = false
             isPlaying = false
@@ -300,6 +364,7 @@ final class PlaybackEngine: ObservableObject {
         isBuffering = true
         updateNowPlayingInfo()
         loadArtwork()
+        loadLyricsForNowPlaying()
     }
 
     private func cleanupPlayer() {
@@ -340,6 +405,7 @@ final class PlaybackEngine: ObservableObject {
             startHiResProgressTimer()
             updateNowPlayingInfo()
             loadArtwork()
+            loadLyricsForNowPlaying()
         } catch {
             print("[PlaybackEngine] libFLAC decode failed: \(error)")
             usingHiRes = false
@@ -497,6 +563,7 @@ final class PlaybackEngine: ObservableObject {
         currentTime = 0
         duration = 0
         isPlaying = false
+        currentLyrics = []
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
@@ -505,7 +572,8 @@ final class PlaybackEngine: ObservableObject {
         var info: [String: Any] = [:]
         info[MPMediaItemPropertyTitle] = track.name
         info[MPMediaItemPropertyArtist] = track.singer
-        if let album = track.albumName { info[MPMediaItemPropertyAlbumTitle] = album }
+        // The album field doubles as a synced-lyric line on CarPlay/lock screen when enabled.
+        if let album = nowPlayingAlbumText() { info[MPMediaItemPropertyAlbumTitle] = album }
         info[MPMediaItemPropertyPlaybackDuration] = duration
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
@@ -518,6 +586,8 @@ final class PlaybackEngine: ObservableObject {
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         info[MPMediaItemPropertyPlaybackDuration] = duration
+        // Advance the lyric line shown in the album field as playback progresses.
+        if let album = nowPlayingAlbumText() { info[MPMediaItemPropertyAlbumTitle] = album }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
@@ -530,6 +600,39 @@ final class PlaybackEngine: ObservableObject {
             await MainActor.run { [weak self] in
                 self?.currentArtwork = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
                 self?.updateNowPlayingInfo()
+            }
+        }
+    }
+
+    /// Whether the now-playing album field should show synced lyrics instead of the album name. Defaults on.
+    private var lyricsOnNowPlaying: Bool {
+        UserDefaults.standard.object(forKey: "pref.showLyricsOnNowPlaying") == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: "pref.showLyricsOnNowPlaying")
+    }
+
+    /// Text for the now-playing album field: the active lyric line when enabled + available,
+    /// otherwise the real album name.
+    private func nowPlayingAlbumText() -> String? {
+        if lyricsOnNowPlaying, !currentLyrics.isEmpty,
+           let idx = LRCParser.activeIndex(at: currentTime, in: currentLyrics) {
+            let line = currentLyrics[idx].text.trimmingCharacters(in: .whitespaces)
+            if !line.isEmpty { return line }
+        }
+        return currentTrack?.albumName
+    }
+
+    private func loadLyricsForNowPlaying() {
+        currentLyrics = []
+        guard let track = currentTrack, let resolver = lyricsResolver else { return }
+        let trackID = track.id
+        Task { [weak self] in
+            let lines = await resolver(track)
+            await MainActor.run { [weak self] in
+                guard let self, self.currentTrack?.id == trackID else { return }
+                // Only timestamped lines can be synced to the playback position.
+                self.currentLyrics = lines.filter { $0.time >= 0 }
+                self.updateNowPlayingInfo()
             }
         }
     }

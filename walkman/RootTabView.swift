@@ -45,8 +45,6 @@ struct RootTabView: View {
     @State private var songlistPath = NavigationPath()
     @State private var libraryPath = NavigationPath()
     @AppStorage("ui.activeTab") private var activeTab: Int = 0
-    @AppStorage("debug.showPlayer") private var debugShowPlayer: Bool = false
-    @AppStorage("debug.openScreen") private var debugOpenScreen: String = ""
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -84,32 +82,6 @@ struct RootTabView: View {
         .animation(.spring(duration: 0.3), value: playback.currentTrack?.id)
         .sheet(isPresented: $showPlayer) {
             PlayerView()
-        }
-        .task {
-            // Debug auto-navigation (open a specific screen after launch).
-            if debugOpenScreen.hasPrefix("leaderboard") {
-                activeTab = 1   // 排行榜 tab
-                let parts = debugOpenScreen.split(separator: ":", maxSplits: 1).map(String.init)
-                if parts.count == 2,
-                   let board = Boards.allBoards.first(where: { $0.id == parts[1] }) {
-                    leaderboardPath.append(board)
-                }
-            } else if debugOpenScreen.hasPrefix("songlist") {
-                activeTab = 2   // 歌单 tab
-                let parts = debugOpenScreen.split(separator: ":", maxSplits: 1).map(String.init)
-                if parts.count == 2 {
-                    let pid = parts[1]
-                    songlistPath.append(SonglistInfo(id: pid, source: .kw, name: "Loading…", author: "", picURL: nil, trackCount: nil, playCount: nil))
-                }
-            }
-            guard debugShowPlayer else { return }
-            for _ in 0..<150 {  // 150 × 200ms = 30s budget so script resolve has time to finish
-                if playback.currentTrack != nil && playback.isPlaying {
-                    showPlayer = true
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 200_000_000)
-            }
         }
     }
 }

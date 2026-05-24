@@ -13,10 +13,11 @@ struct SettingsView: View {
                         Label(q.displayName, systemImage: iconForQuality(q)).tag(q)
                     }
                 }
+                Toggle("车机/锁屏用专辑栏显示歌词", isOn: $settings.showLyricsOnNowPlaying)
             } header: {
                 Text("播放")
             } footer: {
-                Text("脚本会按此优先级请求音源 URL,若该音质不可用,会自动降级")
+                Text("脚本会按此优先级请求音源 URL,若该音质不可用,会自动降级。开启「用专辑栏显示歌词」后,CarPlay 和锁屏原本显示专辑名的位置,会随播放进度显示当前歌词(参考 QQ / 网易云);无歌词时仍显示专辑名")
             }
 
             Section {

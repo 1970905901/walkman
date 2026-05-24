@@ -215,6 +215,10 @@ final class SettingsStore: ObservableObject {
     @Published var showDebugNotices: Bool {
         didSet { UserDefaults.standard.set(showDebugNotices, forKey: "pref.showDebugNotices") }
     }
+    /// Show the synced current lyric line in the CarPlay / lock-screen album field instead of the album name.
+    @Published var showLyricsOnNowPlaying: Bool {
+        didSet { UserDefaults.standard.set(showLyricsOnNowPlaying, forKey: "pref.showLyricsOnNowPlaying") }
+    }
 
     init() {
         let q = UserDefaults.standard.string(forKey: "pref.quality") ?? Quality.k320.rawValue
@@ -228,5 +232,10 @@ final class SettingsStore: ObservableObject {
             self.enableDirectFallback = UserDefaults.standard.bool(forKey: "pref.enableDirectFallback")
         }
         self.showDebugNotices = UserDefaults.standard.bool(forKey: "pref.showDebugNotices")  // default off
+        if UserDefaults.standard.object(forKey: "pref.showLyricsOnNowPlaying") == nil {
+            self.showLyricsOnNowPlaying = true  // default on
+        } else {
+            self.showLyricsOnNowPlaying = UserDefaults.standard.bool(forKey: "pref.showLyricsOnNowPlaying")
+        }
     }
 }

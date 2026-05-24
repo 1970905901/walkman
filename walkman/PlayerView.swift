@@ -7,9 +7,8 @@ struct PlayerView: View {
     @StateObject private var artwork = ArtworkColors()
     @State private var seekValue: Double = 0
     @State private var isSeeking: Bool = false
-    @AppStorage("debug.startPage") private var page: Int = 0  // 0 = cover, 1 = lyrics
+    @State private var page: Int = 0  // 0 = cover, 1 = lyrics
     @State private var showQueue = false
-    @AppStorage("debug.showQueue") private var debugShowQueue: Bool = false
     @State private var lyrics: [LyricLine] = []
     @State private var loadingLyrics = false
     @State private var trackToFavorite: Track?
@@ -39,7 +38,6 @@ struct PlayerView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             sync()
-            if debugShowQueue { showQueue = true }
         }
         .onChange(of: playback.currentTrack?.id) { _, _ in sync() }
         .sheet(isPresented: $showQueue) {

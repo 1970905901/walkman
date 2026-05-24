@@ -32,9 +32,7 @@ struct SearchView: View {
     @State private var resultsByScope: [SearchScope: [Track]] = [:]
     @State private var loadingScopes: Set<SearchScope> = []
     @State private var error: String?
-    @State private var trackToAdd: Track?
     @FocusState private var searchFocused: Bool
-    @AppStorage("debug.autoSearch") private var debugAutoSearch: String = ""
 
     private let tabs: [SearchScope] = [
         .all,
@@ -75,15 +73,6 @@ struct SearchView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("搜索")
         .navigationBarTitleDisplayMode(.large)
-        .sheet(item: $trackToAdd) { track in
-            AddToPlaylistSheet(track: track)
-        }
-        .onAppear {
-            if !debugAutoSearch.isEmpty && keyword.isEmpty {
-                keyword = debugAutoSearch
-                searchAll()
-            }
-        }
     }
 
     // MARK: - Bar
@@ -165,10 +154,7 @@ struct SearchView: View {
                     playback.play(track: track, in: results, startIndex: results.firstIndex { $0.id == track.id })
                     pushHistory(keyword)
                 }
-                .swipeActions(edge: .trailing) {
-                    Button { trackToAdd = track } label: { Label("收藏", systemImage: "plus.circle") }
-                        .tint(.accentColor)
-                }
+                .trackRowSwipe(track)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
@@ -434,5 +420,37 @@ struct AddToPlaylistSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
             }
         }
+    }
+}
+
+// MARK: - Track row swipe actions (shared)
+
+/// Trailing swipe with 收藏 + 下载 (and an optional 移除). Bundles the two sheets so every
+/// track list — search, 排行榜, 歌单, 我的歌单 — gets identical behavior with one modifier.
+struct TrackRowSwipe: ViewModifier {
+    let track: Track
+    var onRemove: (() -> Void)? = nil
+    @State private var showAdd = false
+    @State private var showDownload = false
+
+    func body(content: Content) -> some View {
+        content
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button { showAdd = true } label: { Label("收藏", systemImage: "plus.circle") }
+                    .tint(.accentColor)
+                Button { showDownload = true } label: { Label("下载", systemImage: "arrow.down.circle") }
+                    .tint(.indigo)
+                if let onRemove {
+                    Button(role: .destructive, action: onRemove) { Label("移除", systemImage: "trash") }
+                }
+            }
+            .sheet(isPresented: $showAdd) { AddToPlaylistSheet(track: track) }
+            .sheet(isPresented: $showDownload) { DownloadSheet(track: track) }
+    }
+}
+
+extension View {
+    func trackRowSwipe(_ track: Track, onRemove: (() -> Void)? = nil) -> some View {
+        modifier(TrackRowSwipe(track: track, onRemove: onRemove))
     }
 }

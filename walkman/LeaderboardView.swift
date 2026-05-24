@@ -99,7 +99,6 @@ struct BoardDetailView: View {
     @State private var tracks: [Track] = []
     @State private var isLoading = false
     @State private var error: String?
-    @State private var trackToAdd: Track?
 
     var body: some View {
         Group {
@@ -152,10 +151,7 @@ struct BoardDetailView: View {
                             }
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
-                            .swipeActions(edge: .trailing) {
-                                Button { trackToAdd = t } label: { Label("收藏", systemImage: "plus.circle") }
-                                    .tint(.accentColor)
-                            }
+                            .trackRowSwipe(t)
                         }
                     }
                 }
@@ -166,9 +162,6 @@ struct BoardDetailView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle(board.name)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $trackToAdd) { track in
-            AddToPlaylistSheet(track: track)
-        }
         .task {
             guard tracks.isEmpty, !isLoading else { return }
             isLoading = true
