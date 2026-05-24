@@ -4,6 +4,15 @@ import MediaPlayer
 import Combine
 import UIKit
 
+/// Snapshot of the player persisted between launches so we can restore where the user left off.
+private struct PersistedPlaybackState: Codable {
+    var queue: [Track]
+    var queueIndex: Int
+    var position: Double
+    var loopMode: String
+    var shuffle: Bool
+}
+
 @MainActor
 final class PlaybackEngine: ObservableObject {
     @Published private(set) var currentTrack: Track?
@@ -65,6 +74,20 @@ final class PlaybackEngine: ObservableObject {
     private var routeChangeObserver: NSObjectProtocol?
     /// Whether we were playing when an interruption began, so we know to auto-resume after it ends.
     private var wasPlayingBeforeInterruption = false
+    /// Where the last session (queue + position) is persisted so we can restore on next launch.
+    private let stateURL: URL = {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("playbackState.json")
+    }()
+    private var lastPersist = Date.distantPast
+    /// Set while restoring a previous session: we defer creating the AVPlayer until the user hits
+    /// play, then seek to this position once the item is ready.
+    private var pendingRestorePosition: Double?
+    private var needsLoad = false
+    /// Last track id written to play history — avoids double-recording on quality cascades.
+    private var lastRecordedTrackID: String?
+    /// Called when a track actually begins playing. Used by the app to record play history.
+    var onTrackPlayed: ((Track) -> Void)?
 
     init() {
         configureAudioSession()
@@ -214,6 +237,9 @@ final class PlaybackEngine: ObservableObject {
             triedQualities = []
             cascadeNotice = nil
             triedHiRes = false
+            // A pending restore-seek only applies to the song we restored; a different song
+            // means the user moved on, so drop it.
+            pendingRestorePosition = nil
         }
         if let q = currentQuality { triedQualities.insert(q) }
         currentTrack = track
@@ -237,6 +263,11 @@ final class PlaybackEngine: ObservableObject {
                 }
             } else {
                 throw NSError(domain: "Playback", code: -1, userInfo: [NSLocalizedDescriptionKey: "No URL resolver"])
+            }
+            // Record into play history once per song (not on quality-cascade re-resolves).
+            if track.id != lastRecordedTrackID {
+                lastRecordedTrackID = track.id
+                onTrackPlayed?(track)
             }
             startPlayback(url: url)
         } catch {
@@ -268,6 +299,11 @@ final class PlaybackEngine: ObservableObject {
                 case .readyToPlay:
                     print("[PlaybackEngine] item ready, duration=\(item.duration.seconds)")
                     self.qualityCap = nil   // success → next time use user's preferred again
+                    // Restoring a previous session: jump to where we left off, now that we can seek.
+                    if let pos = self.pendingRestorePosition {
+                        self.pendingRestorePosition = nil
+                        if pos > 1 { self.seek(to: pos) }
+                    }
                 case .failed:
                     let err = item.error?.localizedDescription ?? "未知错误"
                     let nsErr = item.error as NSError?
@@ -342,7 +378,10 @@ final class PlaybackEngine: ObservableObject {
             print("[PlaybackEngine] playback stalled")
         }
 
-        timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
+        // 0.25s (instead of 0.5s) so the synced lyric line on CarPlay / lock screen and the in-app
+        // lyric scroll advance promptly — combined with LyricSync.leadSeconds this keeps lyrics
+        // slightly ahead of the vocal rather than trailing it.
+        timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
             let seconds = time.seconds.isFinite ? time.seconds : 0
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -352,6 +391,7 @@ final class PlaybackEngine: ObservableObject {
                 }
                 self.isBuffering = (self.player?.currentItem?.isPlaybackLikelyToKeepUp == false)
                 self.updateNowPlayingTime()
+                self.persistState()
             }
         }
         endObserver = NotificationCenter.default.addObserver(
@@ -365,6 +405,7 @@ final class PlaybackEngine: ObservableObject {
         updateNowPlayingInfo()
         loadArtwork()
         loadLyricsForNowPlaying()
+        persistState(force: true)
     }
 
     private func cleanupPlayer() {
@@ -398,6 +439,10 @@ final class PlaybackEngine: ObservableObject {
             isBuffering = false
             isPlaying = true
             duration = hiResPlayer.duration
+            if let pos = pendingRestorePosition {
+                pendingRestorePosition = nil
+                if pos > 1 { hiResPlayer.seek(to: pos); currentTime = pos }
+            }
             cascadeNotice = "iOS 原生解码失败,已用内置 Hi-Res 解码器(libFLAC)播放"
             hiResPlayer.onPlaybackEnded = { [weak self] in
                 Task { @MainActor in self?.handleItemEnded() }
@@ -435,6 +480,7 @@ final class PlaybackEngine: ObservableObject {
                 self.duration = self.hiResPlayer.duration
                 self.isBuffering = false
                 self.updateNowPlayingTime()
+                self.persistState()
             }
         }
     }
@@ -452,9 +498,16 @@ final class PlaybackEngine: ObservableObject {
         if usingHiRes { hiResPlayer.pause() } else { player?.pause() }
         isPlaying = false
         updateNowPlayingTime()
+        persistState(force: true)
     }
 
     func resume() {
+        // Restored session: the AVPlayer wasn't created yet — load now and seek to the saved position.
+        if needsLoad {
+            needsLoad = false
+            Task { await loadAndPlayCurrent() }
+            return
+        }
         if currentTrack == nil, !queue.isEmpty {
             queueIndex = max(0, min(queueIndex, queue.count - 1))
             Task { await loadAndPlayCurrent() }
@@ -474,6 +527,7 @@ final class PlaybackEngine: ObservableObject {
         }
         currentTime = clamped
         updateNowPlayingTime()
+        persistState(force: true)
     }
 
     func next() {
@@ -536,6 +590,7 @@ final class PlaybackEngine: ObservableObject {
             // Removed a track before the current one; shift index back so currentTrack is unchanged.
             queueIndex -= 1
         }
+        persistState(force: true)
     }
 
     /// Move a track within the queue (drag-reorder).
@@ -551,6 +606,7 @@ final class PlaybackEngine: ObservableObject {
         } else if source > queueIndex, target <= queueIndex {
             queueIndex += 1
         }
+        persistState(force: true)
     }
 
     func clearQueue() {
@@ -564,7 +620,11 @@ final class PlaybackEngine: ObservableObject {
         duration = 0
         isPlaying = false
         currentLyrics = []
+        needsLoad = false
+        pendingRestorePosition = nil
+        lastRecordedTrackID = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        persistState(force: true)
     }
 
     private func updateNowPlayingInfo() {
@@ -615,7 +675,7 @@ final class PlaybackEngine: ObservableObject {
     /// otherwise the real album name.
     private func nowPlayingAlbumText() -> String? {
         if lyricsOnNowPlaying, !currentLyrics.isEmpty,
-           let idx = LRCParser.activeIndex(at: currentTime, in: currentLyrics) {
+           let idx = LRCParser.activeIndex(at: currentTime + LyricSync.leadSeconds, in: currentLyrics) {
             let line = currentLyrics[idx].text.trimmingCharacters(in: .whitespaces)
             if !line.isEmpty { return line }
         }
@@ -635,6 +695,55 @@ final class PlaybackEngine: ObservableObject {
                 self.updateNowPlayingInfo()
             }
         }
+    }
+
+    // MARK: - Session persistence
+
+    /// Write the current queue + position to disk. Throttled to ~once every 5s for the frequent
+    /// time-observer calls; pass `force` for one-off events (play/pause/seek/queue edits).
+    private func persistState(force: Bool = false) {
+        guard !queue.isEmpty, currentTrack != nil else {
+            try? FileManager.default.removeItem(at: stateURL)
+            return
+        }
+        let now = Date()
+        if !force, now.timeIntervalSince(lastPersist) < 5 { return }
+        lastPersist = now
+        let state = PersistedPlaybackState(
+            queue: queue,
+            queueIndex: queueIndex,
+            position: currentTime,
+            loopMode: loopMode.rawValue,
+            shuffle: shuffle
+        )
+        if let data = try? JSONEncoder().encode(state) {
+            try? data.write(to: stateURL, options: .atomic)
+        }
+    }
+
+    /// Restore the last session on launch: rebuild the queue and show the track in a paused state
+    /// (no autoplay). The AVPlayer is created lazily when the user hits play, seeking to `position`.
+    func restoreLastSession() {
+        guard currentTrack == nil, queue.isEmpty,
+              let data = try? Data(contentsOf: stateURL),
+              let state = try? JSONDecoder().decode(PersistedPlaybackState.self, from: data),
+              state.queue.indices.contains(state.queueIndex) else { return }
+        queue = state.queue
+        queueIndex = state.queueIndex
+        loopMode = LoopMode(rawValue: state.loopMode) ?? .all
+        shuffle = state.shuffle
+        let track = state.queue[state.queueIndex]
+        currentTrack = track
+        currentTime = state.position
+        duration = Double(track.duration ?? 0)
+        pendingRestorePosition = state.position
+        needsLoad = true
+        isPlaying = false
+        isBuffering = false
+        // Show the restored track on the lock screen / CarPlay even before playback starts.
+        updateNowPlayingInfo()
+        loadArtwork()
+        loadLyricsForNowPlaying()
     }
 
     /// Cascade: flac24bit → flac → 320k → 128k. Returns next quality below `current` that

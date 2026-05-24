@@ -1,0 +1,885 @@
+{
+  "sourceLanguage" : "zh-Hans",
+  "strings" : {
+    "%lld" : {
+
+    },
+    "%lld 个已加载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld loaded"
+          }
+        }
+      }
+    },
+    "%lld 首" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld songs"
+          }
+        }
+      }
+    },
+    "%lld 首歌曲" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld songs"
+          }
+        }
+      }
+    },
+    "Top 100" : {
+
+    },
+    "v%@" : {
+
+    },
+    "v%@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "v%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "上次同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last synced"
+          }
+        }
+      }
+    },
+    "下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download"
+          }
+        }
+      }
+    },
+    "下载中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading"
+          }
+        }
+      }
+    },
+    "下载到子歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download to Sub-playlist"
+          }
+        }
+      }
+    },
+    "下载状态" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Status"
+          }
+        }
+      }
+    },
+    "云端" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud"
+          }
+        }
+      }
+    },
+    "从搜索、排行榜或歌单点歌后,接下来播放的歌会显示在这里" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Songs you queue from Search, Charts, or a playlist will appear here"
+          }
+        }
+      }
+    },
+    "使用 iCloud Key-Value 同步歌单和设置(脚本本身不上传)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync playlists and settings via iCloud Key-Value (scripts themselves are not uploaded)"
+          }
+        }
+      }
+    },
+    "使用 iCloud 同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync via iCloud"
+          }
+        }
+      }
+    },
+    "关于" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About"
+          }
+        }
+      }
+    },
+    "最近搜索" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recent Searches"
+          }
+        }
+      }
+    },
+    "创建" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create"
+          }
+        }
+      }
+    },
+    "删除" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete"
+          }
+        }
+      }
+    },
+    "删除子歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Sub-playlist"
+          }
+        }
+      }
+    },
+    "删除歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Playlist"
+          }
+        }
+      }
+    },
+    "加载失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to load"
+          }
+        }
+      }
+    },
+    "发现你喜欢的音乐" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Discover music you love"
+          }
+        }
+      }
+    },
+    "取消" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        }
+      }
+    },
+    "可在多个音源中搜索,自定义脚本提供高品质播放地址" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search across multiple sources; custom scripts provide high-quality playback URLs"
+          }
+        }
+      }
+    },
+    "名称" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        }
+      }
+    },
+    "启用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable"
+          }
+        }
+      }
+    },
+    "在播放器或歌曲菜单里下载到这个子歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download to this sub-playlist from the player or the song menu"
+          }
+        }
+      }
+    },
+    "失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed"
+          }
+        }
+      }
+    },
+    "子歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sub-playlist"
+          }
+        }
+      }
+    },
+    "完成" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        }
+      }
+    },
+    "导入中..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importing…"
+          }
+        }
+      }
+    },
+    "导入并加载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import and Load"
+          }
+        }
+      }
+    },
+    "导入脚本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import Script"
+          }
+        }
+      }
+    },
+    "已下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloaded"
+          }
+        }
+      }
+    },
+    "已加载的源" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loaded Sources"
+          }
+        }
+      }
+    },
+    "已完成 (%lld)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Completed (%lld)"
+          }
+        }
+      }
+    },
+    "开启后,播放时会显示「换源播放」「音质降级」「使用内置 Hi-Res 解码」等提示横幅。真正的播放错误始终显示,不受此开关影响" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When enabled, banners such as “Source switched,” “Quality downgraded,” and “Using built-in Hi-Res decoding” appear during playback. Actual playback errors are always shown and are unaffected by this switch."
+          }
+        }
+      }
+    },
+    "开始下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start Download"
+          }
+        }
+      }
+    },
+    "我的" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Library"
+          }
+        }
+      }
+    },
+    "我的歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "My Playlists"
+          }
+        }
+      }
+    },
+    "换个关键字或切换音源试试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try a different keyword or switch sources"
+          }
+        }
+      }
+    },
+    "排行榜" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Charts"
+          }
+        }
+      }
+    },
+    "接下来播放" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up Next"
+          }
+        }
+      }
+    },
+    "搜索" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search"
+          }
+        }
+      }
+    },
+    "播放" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play"
+          }
+        }
+      }
+    },
+    "播放全部" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play All"
+          }
+        }
+      }
+    },
+    "播放历史" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play History"
+          }
+        }
+      }
+    },
+    "播放过的歌曲会出现在这里" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Songs you've played will appear here"
+          }
+        }
+      }
+    },
+    "播放队列" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play Queue"
+          }
+        }
+      }
+    },
+    "收藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Favorite"
+          }
+        }
+      }
+    },
+    "收藏到歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to Playlist"
+          }
+        }
+      }
+    },
+    "新建子歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New Sub-playlist"
+          }
+        }
+      }
+    },
+    "新建歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New Playlist"
+          }
+        }
+      }
+    },
+    "方式" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Method"
+          }
+        }
+      }
+    },
+    "显示调试提示" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Debug Banners"
+          }
+        }
+      }
+    },
+    "暂无下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No downloads"
+          }
+        }
+      }
+    },
+    "暂无歌词" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No lyrics"
+          }
+        }
+      }
+    },
+    "暂无自定义脚本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No custom scripts"
+          }
+        }
+      }
+    },
+    "曲目" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tracks"
+          }
+        }
+      }
+    },
+    "歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlists"
+          }
+        }
+      }
+    },
+    "歌单不存在" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist not found"
+          }
+        }
+      }
+    },
+    "歌曲" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Songs"
+          }
+        }
+      }
+    },
+    "歌曲、歌手、专辑" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Songs, artists, albums"
+          }
+        }
+      }
+    },
+    "没有找到歌曲" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No songs found"
+          }
+        }
+      }
+    },
+    "清空" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear"
+          }
+        }
+      }
+    },
+    "清空播放历史?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear play history?"
+          }
+        }
+      }
+    },
+    "清除" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear"
+          }
+        }
+      }
+    },
+    "点击右上角 + 从 URL 或粘贴板导入 lx-music v4 用户脚本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap + in the top-right to import an lx-music v4 user script from a URL or the clipboard"
+          }
+        }
+      }
+    },
+    "版本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version"
+          }
+        }
+      }
+    },
+    "移除" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove"
+          }
+        }
+      }
+    },
+    "脚本 URL" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Script URL"
+          }
+        }
+      }
+    },
+    "脚本会按此优先级请求音源 URL,若该音质不可用,会自动降级。开启「用专辑栏显示歌词」后,CarPlay 和锁屏原本显示专辑名的位置,会随播放进度显示当前歌词(参考 QQ / 网易云);无歌词时仍显示专辑名" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scripts request source URLs in this priority order; if a quality level is unavailable, it falls back automatically. When “Show lyrics in the album field” is on, the spot that normally shows the album name on CarPlay and the Lock Screen shows the current lyric line as playback progresses (like QQ Music / NetEase Cloud Music); the album name is still shown when no lyrics are available."
+          }
+        }
+      }
+    },
+    "脚本内容" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Script Content"
+          }
+        }
+      }
+    },
+    "脚本失败或未配置音源时,回落到内置直连(仅支持酷我/网易云)。如果你添加的音源能正常解析,可关闭此项严格走脚本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When the script fails or no source is configured, fall back to the built-in direct connection (Kuwo / NetEase only). If the sources you added resolve correctly, you can turn this off to use scripts exclusively."
+          }
+        }
+      }
+    },
+    "脚本失败时走内置直连 (非官方)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use built-in direct connection when scripts fail (unofficial)"
+          }
+        }
+      }
+    },
+    "自定义音源" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom Sources"
+          }
+        }
+      }
+    },
+    "设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings"
+          }
+        }
+      }
+    },
+    "调试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debug"
+          }
+        }
+      }
+    },
+    "车机/锁屏用专辑栏显示歌词" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show lyrics in the album field on car displays / Lock Screen"
+          }
+        }
+      }
+    },
+    "还没有下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing downloaded yet"
+          }
+        }
+      }
+    },
+    "还没有播放记录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No play history yet"
+          }
+        }
+      }
+    },
+    "重新加载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reload"
+          }
+        }
+      }
+    },
+    "队列空空如也" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The queue is empty"
+          }
+        }
+      }
+    },
+    "随机播放" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shuffle"
+          }
+        }
+      }
+    },
+    "音源" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Source"
+          }
+        }
+      }
+    },
+    "音质" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quality"
+          }
+        }
+      }
+    },
+    "顺序播放" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play in Order"
+          }
+        }
+      }
+    },
+    "默认音质" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default Quality"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.1"
+}

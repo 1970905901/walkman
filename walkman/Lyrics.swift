@@ -1,5 +1,13 @@
 import Foundation
 
+/// Lyric timing tweaks shared by the in-app lyric view and the CarPlay / lock-screen line.
+nonisolated enum LyricSync {
+    /// How far ahead of the vocal each line is shown. The now-playing info center and CarPlay
+    /// add their own render latency, so we look ahead a bit to land the line on screen *as* the
+    /// singer reaches it ("先出歌词") — kept small so a line never scrolls away before it's sung.
+    static let leadSeconds: Double = 0.5
+}
+
 nonisolated struct LyricLine: Identifiable, Hashable, Sendable {
     let id: Int
     let time: Double

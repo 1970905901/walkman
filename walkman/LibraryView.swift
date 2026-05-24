@@ -8,6 +8,7 @@ struct LibraryView: View {
     @EnvironmentObject var playlists: PlaylistStore
     @EnvironmentObject var playback: PlaybackEngine
     @EnvironmentObject var downloads: DownloadStore
+    @EnvironmentObject var history: PlayHistoryStore
     @State private var showCreate = false
     @State private var newName = ""
 
@@ -16,13 +17,32 @@ struct LibraryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.Spacing.l) {
-                NavigationLink {
-                    DownloadedView()
-                } label: {
-                    downloadedRow
-                        .padding(.horizontal, DS.Spacing.l)
+                HStack(spacing: 14) {
+                    NavigationLink {
+                        DownloadedView()
+                    } label: {
+                        LibraryShortcutCard(
+                            icon: "arrow.down.circle.fill",
+                            title: "已下载",
+                            subtitle: "\(downloads.completedCount) 首 · \(downloads.folders.count) 个歌单",
+                            gradient: [.accentColor, .accentColor.opacity(0.6)]
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        PlayHistoryView()
+                    } label: {
+                        LibraryShortcutCard(
+                            icon: "clock.arrow.circlepath",
+                            title: "播放历史",
+                            subtitle: "\(history.tracks.count) 首",
+                            gradient: [.orange, .pink]
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, DS.Spacing.l)
 
                 Section {
                     LazyVGrid(columns: columns, spacing: 14) {
@@ -83,28 +103,6 @@ struct LibraryView: View {
         }
     }
 
-    private var downloadedRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.down.circle.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 44, height: 44)
-                .background(LinearGradient(colors: [.accentColor, .accentColor.opacity(0.6)],
-                                           startPoint: .top, endPoint: .bottom),
-                            in: RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("已下载").font(.system(size: 16, weight: .semibold)).foregroundColor(.primary)
-                Text("\(downloads.completedCount) 首 · \(downloads.folders.count) 个子歌单")
-                    .font(.caption).foregroundColor(.secondary)
-            }
-            Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
-        }
-        .padding(12)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
-    }
-
     private func sectionHeader(_ title: String, subtitle: String? = nil) -> some View {
         HStack(alignment: .lastTextBaseline) {
             Text(title).font(DS.Typography.sectionTitle)
@@ -113,6 +111,33 @@ struct LibraryView: View {
             }
             Spacer()
         }
+    }
+}
+
+/// Half-width entry card used for the 已下载 / 播放历史 shortcuts at the top of 我的.
+private struct LibraryShortcutCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let gradient: [Color]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 44, height: 44)
+                .background(LinearGradient(colors: gradient, startPoint: .top, endPoint: .bottom),
+                            in: RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 16, weight: .semibold)).foregroundColor(.primary)
+                Text(subtitle).font(.caption).foregroundColor(.secondary).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
     }
 }
 

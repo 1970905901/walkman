@@ -166,9 +166,9 @@ struct PlayerView: View {
             }
             .padding(.top, DS.Spacing.xl)
             AudioWave(active: playback.isPlaying && !playback.isBuffering)
-                .frame(height: 40)
+                .frame(height: 68)
                 .padding(.horizontal, 4)
-                .padding(.top, DS.Spacing.l)
+                .padding(.top, DS.Spacing.xl)
             Spacer()
         }
         .offset(y: -18)
@@ -294,9 +294,9 @@ struct AudioWave: View {
 
     // (baseAmp fraction, wavelength, drift speed, pulse speed, pulse phase, max opacity, line width)
     private let waves: [(amp: CGFloat, wl: CGFloat, drift: Double, pulse: Double, pPhase: Double, opacity: Double, width: CGFloat)] = [
-        (0.92, 235, 0.50, 1.7, 0.0, 0.45, 1.3),
-        (0.62, 165, 0.85, 2.3, 1.1, 0.85, 1.1),
-        (0.42, 125, 1.20, 3.1, 2.4, 0.32, 0.9),
+        (1.00, 235, 0.70, 2.6, 0.0, 0.45, 1.3),
+        (0.74, 165, 1.10, 3.4, 1.1, 0.85, 1.1),
+        (0.52, 125, 1.65, 4.3, 2.4, 0.32, 0.9),
     ]
 
     var body: some View {
@@ -306,9 +306,12 @@ struct AudioWave: View {
                 let midY = size.height / 2
                 let W = size.width
                 for w in waves {
-                    // amplitude "breathes" at its own rate (two summed sines → irregular, music-like)
-                    let pulse = 0.5 + 0.32 * sin(t * w.pulse + w.pPhase) + 0.18 * sin(t * w.pulse * 0.55 + w.pPhase)
-                    let amp = w.amp * size.height / 2 * CGFloat(pulse)
+                    // amplitude "beats": two summed sines with a wide swing → snappy, music-like rise/fall
+                    let beat = 0.5 + 0.38 * sin(t * w.pulse + w.pPhase) + 0.22 * sin(t * w.pulse * 1.9 + w.pPhase * 1.7)
+                    let pulse = max(0.08, beat)
+                    // Clamp so the tallest peak always stays inside the view (no clipping). 0.92 leaves
+                    // a little headroom for the line width on top of the half-height.
+                    let amp = min(w.amp * CGFloat(pulse), 0.92) * size.height / 2
                     let phase = t * w.drift * 2.2
                     var path = Path()
                     var x: CGFloat = 0
@@ -399,7 +402,9 @@ struct LyricsScroll: View {
     let onTap: (Double) -> Void
 
     var body: some View {
-        let active = LRCParser.activeIndex(at: currentTime, in: lines)
+        // Look slightly ahead so the highlighted line lands as the vocal reaches it, matching
+        // the CarPlay / lock-screen behavior.
+        let active = LRCParser.activeIndex(at: currentTime + LyricSync.leadSeconds, in: lines)
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {

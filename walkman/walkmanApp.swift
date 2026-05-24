@@ -8,6 +8,7 @@ struct walkmanApp: App {
     @StateObject private var scripts = ScriptStore()
     @StateObject private var settings = SettingsStore()
     @StateObject private var downloads = DownloadStore.shared
+    @StateObject private var history = PlayHistoryStore()
 
     var body: some Scene {
         WindowGroup {
@@ -18,6 +19,7 @@ struct walkmanApp: App {
                 .environmentObject(scripts)
                 .environmentObject(settings)
                 .environmentObject(downloads)
+                .environmentObject(history)
                 .task { await bootstrap() }
         }
     }
@@ -44,8 +46,12 @@ struct walkmanApp: App {
         playback.setLyricsResolver { [sources] track in
             await LyricsFetcher.shared.fetch(for: track, sources: sources)
         }
+        // Record every track that starts playing into the play-history list.
+        playback.onTrackPlayed = { [history] track in history.record(track) }
         for s in scripts.scripts where s.enabled {
             await sources.load(script: s)
         }
+        // Bring back the queue + position from the previous session (paused, no autoplay).
+        playback.restoreLastSession()
     }
 }
