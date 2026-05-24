@@ -79,7 +79,6 @@ struct PlayerView: View {
             }
             Spacer()
             VStack(spacing: 2) {
-                Text("正在播放").font(.system(size: 11, weight: .medium)).foregroundColor(.white.opacity(0.65))
                 HStack(spacing: 5) {
                     Text(playback.currentTrack?.source.displayName ?? "")
                         .font(.system(size: 14, weight: .semibold))
@@ -147,7 +146,7 @@ struct PlayerView: View {
     // MARK: - Cover page
 
     private var coverPage: some View {
-        VStack(spacing: DS.Spacing.xl) {
+        VStack(spacing: 0) {
             Spacer()
             ZStack {
                 Artwork(url: playback.currentTrack?.picURL, size: 320, radius: DS.Radius.xlarge)
@@ -165,8 +164,14 @@ struct PlayerView: View {
                     .foregroundColor(.white.opacity(0.75))
                     .lineLimit(1)
             }
+            .padding(.top, DS.Spacing.xl)
+            AudioWave(active: playback.isPlaying && !playback.isBuffering)
+                .frame(height: 40)
+                .padding(.horizontal, 4)
+                .padding(.top, DS.Spacing.l)
             Spacer()
         }
+        .offset(y: -18)
     }
 
     // MARK: - Lyrics page
@@ -275,6 +280,62 @@ struct PlayerView: View {
         let m = Int(time) / 60
         let s = Int(time) % 60
         return String(format: "%02d:%02d", m, s)
+    }
+}
+
+// MARK: - Audio rhythm wave
+
+/// Horizontal flowing waveform: a few overlapping sine waves with different amplitude/wavelength/
+/// speed/opacity (the varying opacity gives the depth look). Drifts while playing, freezes on pause.
+/// Purely decorative — not driven by real audio levels.
+struct AudioWave: View {
+    var active: Bool
+    var color: Color = .white
+
+    // (baseAmp fraction, wavelength, drift speed, pulse speed, pulse phase, max opacity, line width)
+    private let waves: [(amp: CGFloat, wl: CGFloat, drift: Double, pulse: Double, pPhase: Double, opacity: Double, width: CGFloat)] = [
+        (0.92, 235, 0.50, 1.7, 0.0, 0.45, 1.3),
+        (0.62, 165, 0.85, 2.3, 1.1, 0.85, 1.1),
+        (0.42, 125, 1.20, 3.1, 2.4, 0.32, 0.9),
+    ]
+
+    var body: some View {
+        TimelineView(.animation(paused: !active)) { timeline in
+            Canvas { ctx, size in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let midY = size.height / 2
+                let W = size.width
+                for w in waves {
+                    // amplitude "breathes" at its own rate (two summed sines → irregular, music-like)
+                    let pulse = 0.5 + 0.32 * sin(t * w.pulse + w.pPhase) + 0.18 * sin(t * w.pulse * 0.55 + w.pPhase)
+                    let amp = w.amp * size.height / 2 * CGFloat(pulse)
+                    let phase = t * w.drift * 2.2
+                    var path = Path()
+                    var x: CGFloat = 0
+                    func y(at x: CGFloat) -> CGFloat {
+                        // envelope: 0 at both ends, 1 in the middle → all lines converge at the edges
+                        let env = sin(Double(x / W) * .pi)
+                        return midY + CGFloat(sin(Double(x / w.wl) * 2 * .pi + phase)) * amp * CGFloat(env)
+                    }
+                    path.move(to: CGPoint(x: 0, y: y(at: 0)))
+                    while x <= W {
+                        path.addLine(to: CGPoint(x: x, y: y(at: x)))
+                        x += 2
+                    }
+                    // lighter at both ends, darker in the middle
+                    let grad = Gradient(stops: [
+                        .init(color: color.opacity(0), location: 0.0),
+                        .init(color: color.opacity(w.opacity), location: 0.5),
+                        .init(color: color.opacity(0), location: 1.0),
+                    ])
+                    ctx.stroke(path,
+                               with: .linearGradient(grad,
+                                                     startPoint: CGPoint(x: 0, y: midY),
+                                                     endPoint: CGPoint(x: W, y: midY)),
+                               lineWidth: w.width)
+                }
+            }
+        }
     }
 }
 
