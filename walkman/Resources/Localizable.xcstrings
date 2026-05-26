@@ -140,6 +140,17 @@
         }
       }
     },
+    "全部" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All"
+          }
+        }
+      }
+    },
     "关于" : {
       "localizations" : {
         "en" : {
@@ -360,6 +371,16 @@
         }
       }
     },
+    "已读取 %lld 字符" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read %lld characters"
+          }
+        }
+      }
+    },
     "开启后,播放时会显示「换源播放」「音质降级」「使用内置 Hi-Res 解码」等提示横幅。真正的播放错误始终显示,不受此开关影响" : {
       "localizations" : {
         "en" : {
@@ -436,6 +457,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Search"
+          }
+        }
+      }
+    },
+    "搜索歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search playlists"
           }
         }
       }
@@ -540,6 +571,17 @@
         }
       }
     },
+    "无法以 UTF-8 读取该文件" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read this file as UTF-8"
+          }
+        }
+      }
+    },
     "显示调试提示" : {
       "localizations" : {
         "en" : {
@@ -566,6 +608,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No lyrics"
+          }
+        }
+      }
+    },
+    "暂无筛选项" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No filters available"
           }
         }
       }
@@ -626,6 +678,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Songs, artists, albums"
+          }
+        }
+      }
+    },
+    "没有找到歌单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No playlists found"
           }
         }
       }
@@ -700,6 +762,16 @@
         }
       }
     },
+    "筛选" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter"
+          }
+        }
+      }
+    },
     "脚本 URL" : {
       "localizations" : {
         "en" : {
@@ -746,6 +818,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Use built-in direct connection when scripts fail (unofficial)"
+          }
+        }
+      }
+    },
+    "脚本文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Script File"
           }
         }
       }
@@ -806,6 +888,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No play history yet"
+          }
+        }
+      }
+    },
+    "选择脚本文件" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Script File"
           }
         }
       }

@@ -7,12 +7,15 @@ struct ScriptManagerView: View {
     @State private var showImport = false
     @State private var importMode: ImportMode = .url
     @State private var inputText: String = ""
+    @State private var pickedFileName: String?
+    @State private var showFileImporter = false
     @State private var isLoading = false
     @State private var error: String?
 
     enum ImportMode: String, CaseIterable, Identifiable {
         case url = "从 URL"
         case paste = "从粘贴"
+        case file = "从文件"
         var id: String { rawValue }
     }
 
@@ -85,11 +88,25 @@ struct ScriptManagerView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Section(importMode == .url ? "脚本 URL" : "脚本内容") {
-                        TextEditor(text: $inputText)
-                            .frame(minHeight: importMode == .url ? 60 : 200)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
+                    if importMode == .file {
+                        Section("脚本文件") {
+                            Button {
+                                showFileImporter = true
+                            } label: {
+                                Label(pickedFileName ?? "选择脚本文件", systemImage: "doc.badge.plus")
+                            }
+                            if pickedFileName != nil {
+                                Text("已读取 \(inputText.count) 字符")
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+                        }
+                    } else {
+                        Section(importMode == .url ? "脚本 URL" : "脚本内容") {
+                            TextEditor(text: $inputText)
+                                .frame(minHeight: importMode == .url ? 60 : 200)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                        }
                     }
                     if let error {
                         Text(error).foregroundColor(.red).font(.caption)
@@ -108,12 +125,42 @@ struct ScriptManagerView: View {
                         Button("取消") { showImport = false; reset() }
                     }
                 }
+                .onChange(of: importMode) {
+                    // Each mode takes a different input; don't carry stale text/file across.
+                    inputText = ""; pickedFileName = nil; error = nil
+                }
+                .fileImporter(
+                    isPresented: $showFileImporter,
+                    allowedContentTypes: [.javaScript, .text, .plainText, .json, .data],
+                    allowsMultipleSelection: false
+                ) { result in
+                    loadPickedFile(result)
+                }
             }
+        }
+    }
+
+    /// Read the user-picked script file into `inputText` (security-scoped access required).
+    private func loadPickedFile(_ result: Result<[URL], Error>) {
+        error = nil
+        do {
+            guard let url = try result.get().first else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url)
+            guard let text = String(data: data, encoding: .utf8) else {
+                error = "无法以 UTF-8 读取该文件"; return
+            }
+            inputText = text
+            pickedFileName = url.lastPathComponent
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 
     private func reset() {
         inputText = ""
+        pickedFileName = nil
         error = nil
         isLoading = false
     }
@@ -134,7 +181,7 @@ struct ScriptManagerView: View {
                     error = "无法以 UTF-8 解码"; return
                 }
                 raw = s
-            case .paste:
+            case .paste, .file:
                 raw = inputText
             }
             let script = ScriptStore.parseMetadata(from: raw)

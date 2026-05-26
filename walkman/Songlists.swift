@@ -25,12 +25,39 @@ nonisolated struct SonglistOrder: Hashable, Sendable, Identifiable {
     let name: String
 }
 
+/// A single filter tag (歌单分类). `id` is what the platform's list API expects
+/// (NetEase passes the Chinese category name; the others pass a numeric id).
+/// `id == ""` means 全部 / no filter.
+nonisolated struct SonglistTag: Hashable, Sendable, Identifiable {
+    let id: String
+    let name: String
+    static let all = SonglistTag(id: "", name: "全部")
+}
+
+/// A named group of tags (热门/语种/风格/场景…). Groups and their contents differ per platform.
+nonisolated struct SonglistTagGroup: Hashable, Sendable, Identifiable {
+    var id: String { name }
+    let name: String
+    let tags: [SonglistTag]
+}
+
 nonisolated protocol SonglistService: Sendable {
     var source: SourceID { get }
     /// The sort tabs this platform supports (varies per source: 推荐/最热/最新/热藏/飙升…).
     var orders: [SonglistOrder] { get }
-    func fetchRecommended(order: SonglistOrder, page: Int) async throws -> [SonglistInfo]
+    /// Filter-tag groups for this platform. Empty ⇒ no filter UI is shown.
+    func fetchTags() async throws -> [SonglistTagGroup]
+    /// `tag == .all` (empty id) ⇒ recommended/unfiltered list.
+    func fetchRecommended(order: SonglistOrder, tag: SonglistTag, page: Int) async throws -> [SonglistInfo]
     func fetchDetail(_ list: SonglistInfo) async throws -> SonglistDetail
+    /// Search playlists by keyword. Empty result ⇒ no matches / unsupported.
+    func search(keyword: String, page: Int) async throws -> [SonglistInfo]
+}
+
+// Default no-op filter/search so a platform can adopt the protocol incrementally.
+nonisolated extension SonglistService {
+    func fetchTags() async throws -> [SonglistTagGroup] { [] }
+    func search(keyword: String, page: Int) async throws -> [SonglistInfo] { [] }
 }
 
 nonisolated enum Songlists {
@@ -54,8 +81,11 @@ nonisolated struct KuwoSonglistService: SonglistService {
         SonglistOrder(id: "hot", name: "最热"),
     ]
 
-    func fetchRecommended(order: SonglistOrder, page: Int) async throws -> [SonglistInfo] {
-        let urlStr = "http://wapi.kuwo.cn/api/pc/classify/playlist/getRcmPlayList?loginUid=0&loginSid=0&appUid=76039576&pn=\(page)&rn=36&order=\(order.id)"
+    func fetchRecommended(order: SonglistOrder, tag: SonglistTag, page: Int) async throws -> [SonglistInfo] {
+        // No tag ⇒ recommended list (ordered); a tag ⇒ that tag's playlists.
+        let urlStr = tag.id.isEmpty
+            ? "http://wapi.kuwo.cn/api/pc/classify/playlist/getRcmPlayList?loginUid=0&loginSid=0&appUid=76039576&pn=\(page)&rn=36&order=\(order.id)"
+            : "http://wapi.kuwo.cn/api/pc/classify/playlist/getTagPlayList?loginUid=0&loginSid=0&appUid=76039576&pn=\(page)&id=\(tag.id)&rn=36"
         guard let url = URL(string: urlStr) else { return [] }
         var req = URLRequest(url: url)
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
@@ -68,6 +98,59 @@ nonisolated struct KuwoSonglistService: SonglistService {
         return raw.compactMap(buildInfo)
     }
 
+    // Tag groups via getTagList; numeric tag id feeds getTagPlayList above.
+    func fetchTags() async throws -> [SonglistTagGroup] {
+        let urlStr = "http://wapi.kuwo.cn/api/pc/classify/playlist/getTagList?cmd=rcm_keyword_playlist&user=0&prod=kwplayer_pc_9.0.5.0&vipver=9.0.5.0&source=kwplayer_pc_9.0.5.0&loginUid=0&loginSid=0&appUid=76039576"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (json["code"] as? Int) == 200,
+              let raw = json["data"] as? [[String: Any]] else { return [] }
+        return raw.compactMap { type -> SonglistTagGroup? in
+            guard let name = type["name"] as? String,
+                  let items = type["data"] as? [[String: Any]] else { return nil }
+            let tags = items.compactMap { item -> SonglistTag? in
+                guard let n = item["name"] as? String else { return nil }
+                // Only digest==10000 tags resolve via getTagPlayList; digest 43 ("专区") needs a
+                // different endpoint/shape, so we skip those rather than ship dead filters.
+                guard String(describing: item["digest"] ?? "") == "10000" else { return nil }
+                let idVal = item["id"].map { String(describing: $0) } ?? ""
+                return idVal.isEmpty ? nil : SonglistTag(id: idVal, name: n)
+            }
+            return tags.isEmpty ? nil : SonglistTagGroup(name: name, tags: tags)
+        }
+    }
+
+    func search(keyword: String, page: Int) async throws -> [SonglistInfo] {
+        let encoded = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword
+        // client=kt returns strict JSON (the bare ver=mbox variant emits single-quoted pseudo-JSON).
+        let urlStr = "http://search.kuwo.cn/r.s?client=kt&all=\(encoded)&pn=\(page - 1)&rn=30&uid=794762570&ver=kwplayer_ar_9.2.2.1&vipver=1&show_copyright_off=1&newver=1&ft=playlist&cluster=0&strategy=2012&encoding=utf8&rformat=json&vermerge=1&mobi=1&issubtitle=1"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        let (data, _) = try await URLSession.shared.data(for: req)
+        // Kuwo's r.s returns JS-object-ish text (unquoted keys), like the music search endpoint.
+        let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        let abslist = KuwoTolerantJSON.array(text, key: "abslist")
+        return abslist.compactMap { d -> SonglistInfo? in
+            guard let id = (d["playlistid"].map { String(describing: $0) }), !id.isEmpty else { return nil }
+            let plays = Int(d["playcnt"] as? String ?? "") ?? (d["playcnt"] as? Int) ?? 0
+            return SonglistInfo(
+                id: id,
+                source: .kw,
+                name: ((d["name"] as? String) ?? "未知歌单").decodingHTMLEntities(),
+                author: ((d["nickname"] as? String) ?? "").decodingHTMLEntities(),
+                picURL: d["pic"] as? String,
+                trackCount: Int(d["songnum"] as? String ?? "") ?? (d["songnum"] as? Int),
+                playCount: KuwoSonglistService.formatPlayCount(plays)
+            )
+        }
+    }
+
     private func buildInfo(_ d: [String: Any]) -> SonglistInfo? {
         guard let id = d["id"] as? String, !id.isEmpty else { return nil }
         let total: Int? = (d["total"] as? Int) ?? Int(d["total"] as? String ?? "")
@@ -75,8 +158,8 @@ nonisolated struct KuwoSonglistService: SonglistService {
         return SonglistInfo(
             id: id,
             source: .kw,
-            name: (d["name"] as? String) ?? "未知歌单",
-            author: (d["uname"] as? String) ?? "",
+            name: ((d["name"] as? String) ?? "未知歌单").decodingHTMLEntities(),
+            author: ((d["uname"] as? String) ?? "").decodingHTMLEntities(),
             picURL: d["img"] as? String,
             trackCount: total,
             playCount: KuwoSonglistService.formatPlayCount(plays)
@@ -159,10 +242,12 @@ nonisolated struct NetEaseSonglistService: SonglistService {
         SonglistOrder(id: "hot", name: "最热"),
     ]
 
-    func fetchRecommended(order: SonglistOrder, page: Int) async throws -> [SonglistInfo] {
+    func fetchRecommended(order: SonglistOrder, tag: SonglistTag, page: Int) async throws -> [SonglistInfo] {
         let limit = 36
         let offset = (page - 1) * limit
-        let cat = "全部".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "全部"
+        // NetEase's `cat` param is the category's Chinese name itself.
+        let catName = tag.id.isEmpty ? "全部" : tag.name
+        let cat = catName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "全部"
         let urlStr = "https://music.163.com/api/playlist/list?cat=\(cat)&order=\(order.id)&limit=\(limit)&offset=\(offset)"
         guard let url = URL(string: urlStr) else { return [] }
         var req = URLRequest(url: url)
@@ -175,6 +260,37 @@ nonisolated struct NetEaseSonglistService: SonglistService {
         return arr.compactMap(buildInfo)
     }
 
+    // NetEase's catalogue is effectively static; the `cat` value is the name, so id == name.
+    func fetchTags() async throws -> [SonglistTagGroup] { NetEaseSonglistService.staticTags }
+    private static func group(_ name: String, _ names: [String]) -> SonglistTagGroup {
+        SonglistTagGroup(name: name, tags: names.map { SonglistTag(id: $0, name: $0) })
+    }
+    static let staticTags: [SonglistTagGroup] = [
+        group("语种", ["华语", "欧美", "日语", "韩语", "粤语", "小语种"]),
+        group("风格", ["流行", "摇滚", "民谣", "电子", "舞曲", "说唱", "轻音乐", "爵士", "乡村", "R&B/Soul", "古典", "民族", "英伦", "金属", "朋克", "蓝调", "雷鬼", "世界音乐", "拉丁", "另类/独立", "New Age", "古风", "后摇", "Bossa Nova"]),
+        group("场景", ["清晨", "夜晚", "学习", "工作", "午休", "下午茶", "地铁", "驾车", "运动", "旅行", "散步", "酒吧"]),
+        group("情感", ["怀旧", "清新", "浪漫", "性感", "伤感", "治愈", "放松", "孤独", "感动", "兴奋", "快乐", "安静", "思念"]),
+        group("主题", ["影视原声", "ACG", "儿童", "校园", "游戏", "70后", "80后", "90后", "网络歌曲", "KTV", "经典", "翻唱", "吉他", "钢琴", "器乐", "榜单", "00后"]),
+    ]
+
+    func search(keyword: String, page: Int) async throws -> [SonglistInfo] {
+        let limit = 30
+        let offset = (page - 1) * limit
+        let s = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword
+        // type=1000 ⇒ playlists. The plain web search API avoids eapi crypto.
+        let urlStr = "https://music.163.com/api/search/get?s=\(s)&type=1000&limit=\(limit)&offset=\(offset)"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = json["result"] as? [String: Any],
+              let arr = result["playlists"] as? [[String: Any]] else { return [] }
+        return arr.compactMap(buildInfo)
+    }
+
     private func buildInfo(_ d: [String: Any]) -> SonglistInfo? {
         guard let idAny = d["id"] else { return nil }
         let id = String(describing: idAny)
@@ -183,8 +299,8 @@ nonisolated struct NetEaseSonglistService: SonglistService {
         return SonglistInfo(
             id: id,
             source: .wy,
-            name: (d["name"] as? String) ?? "未知歌单",
-            author: (creator?["nickname"] as? String) ?? "",
+            name: ((d["name"] as? String) ?? "未知歌单").decodingHTMLEntities(),
+            author: ((creator?["nickname"] as? String) ?? "").decodingHTMLEntities(),
             picURL: d["coverImgUrl"] as? String,
             trackCount: d["trackCount"] as? Int,
             playCount: KuwoSonglistService.formatPlayCount(plays)
@@ -257,17 +373,30 @@ nonisolated struct QQSonglistService: SonglistService {
     ]
     private let mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"
 
-    func fetchRecommended(order: SonglistOrder, page: Int) async throws -> [SonglistInfo] {
+    func fetchRecommended(order: SonglistOrder, tag: SonglistTag, page: Int) async throws -> [SonglistInfo] {
         let size = 36
-        let orderId = Int(order.id) ?? 5
-        let inner: [String: Any] = [
-            "comm": ["cv": 1602, "ct": 20],
-            "playlist": [
-                "method": "get_playlist_by_tag",
-                "param": ["id": 10000000, "sin": size * (page - 1), "size": size, "order": orderId, "cur_page": page],
-                "module": "playlist.PlayListPlazaServer",
-            ],
-        ]
+        let inner: [String: Any]
+        if tag.id.isEmpty {
+            let orderId = Int(order.id) ?? 5
+            inner = [
+                "comm": ["cv": 1602, "ct": 20],
+                "playlist": [
+                    "method": "get_playlist_by_tag",
+                    "param": ["id": 10000000, "sin": size * (page - 1), "size": size, "order": orderId, "cur_page": page],
+                    "module": "playlist.PlayListPlazaServer",
+                ],
+            ]
+        } else {
+            let cid = Int(tag.id) ?? 0
+            inner = [
+                "comm": ["cv": 1602, "ct": 20],
+                "playlist": [
+                    "method": "get_category_content",
+                    "param": ["titleid": cid, "caller": "0", "category_id": cid, "size": size, "page": page - 1, "use_page": 1],
+                    "module": "playlist.PlayListCategoryServer",
+                ],
+            ]
+        }
         guard let innerData = try? JSONSerialization.data(withJSONObject: inner),
               let dataStr = String(data: innerData, encoding: .utf8),
               let enc = dataStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
@@ -279,19 +408,86 @@ nonisolated struct QQSonglistService: SonglistService {
         let (data, _) = try await URLSession.shared.data(for: req)
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let playlist = json["playlist"] as? [String: Any],
-              let pdata = playlist["data"] as? [String: Any],
-              let arr = pdata["v_playlist"] as? [[String: Any]] else { return [] }
-        return arr.compactMap { d in
-            guard let tidAny = d["tid"] else { return nil }
-            let id = String(describing: tidAny)
-            let creator = d["creator_info"] as? [String: Any]
+              let pdata = playlist["data"] as? [String: Any] else { return [] }
+        if tag.id.isEmpty {
+            let arr = (pdata["v_playlist"] as? [[String: Any]]) ?? []
+            return arr.compactMap(Self.buildInfo)
+        } else {
+            // get_category_content nests each playlist under `content.v_item[].basic`.
+            let items = ((pdata["content"] as? [String: Any])?["v_item"] as? [[String: Any]]) ?? []
+            return items.compactMap { ($0["basic"] as? [String: Any]).flatMap(Self.buildInfo) }
+        }
+    }
+
+    /// Handles both the `get_playlist_by_tag` (cover_url_medium / access_num / creator_info)
+    /// and `get_category_content` (cover.medium_url / play_cnt / creator) item shapes.
+    private static func buildInfo(_ d: [String: Any]) -> SonglistInfo? {
+        guard let tidAny = d["tid"] else { return nil }
+        let id = String(describing: tidAny)
+        let creator = (d["creator_info"] as? [String: Any]) ?? (d["creator"] as? [String: Any])
+        let cover = d["cover"] as? [String: Any]
+        let pic = (d["cover_url_medium"] as? String) ?? (d["cover_url_big"] as? String)
+            ?? (cover?["medium_url"] as? String) ?? (cover?["default_url"] as? String)
+        let plays = (d["access_num"] as? Int) ?? (d["play_cnt"] as? Int) ?? 0
+        return SonglistInfo(
+            id: id, source: .tx,
+            name: ((d["title"] as? String) ?? "未知歌单").decodingHTMLEntities(),
+            author: ((creator?["nick"] as? String) ?? "").decodingHTMLEntities(),
+            picURL: pic,
+            trackCount: (d["song_ids"] as? [Any])?.count,
+            playCount: KuwoSonglistService.formatPlayCount(plays)
+        )
+    }
+
+    func fetchTags() async throws -> [SonglistTagGroup] {
+        let urlStr = "https://u.y.qq.com/cgi-bin/musicu.fcg?loginUin=0&hostUin=0&format=json&inCharset=utf-8&outCharset=utf-8&notice=0&platform=wk_v15.json&needNewCode=0&data=%7B%22tags%22%3A%7B%22method%22%3A%22get_all_categories%22%2C%22param%22%3A%7B%22qq%22%3A%22%22%7D%2C%22module%22%3A%22playlist.PlaylistAllCategoriesServer%22%7D%7D"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue(mobileUA, forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tags = json["tags"] as? [String: Any],
+              let tdata = tags["data"] as? [String: Any],
+              let groups = tdata["v_group"] as? [[String: Any]] else { return [] }
+        return groups.compactMap { g -> SonglistTagGroup? in
+            guard let name = g["group_name"] as? String,
+                  let items = g["v_item"] as? [[String: Any]] else { return nil }
+            let tagList = items.compactMap { item -> SonglistTag? in
+                guard let n = item["name"] as? String, let idAny = item["id"] else { return nil }
+                return SonglistTag(id: String(describing: idAny), name: n)
+            }
+            return tagList.isEmpty ? nil : SonglistTagGroup(name: name, tags: tagList)
+        }
+    }
+
+    func search(keyword: String, page: Int) async throws -> [SonglistInfo] {
+        let limit = 30
+        let q = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword
+        let urlStr = "http://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?page_no=\(page - 1)&num_per_page=\(limit)&format=json&query=\(q)&remoteplace=txt.yqq.playlist&inCharset=utf8&outCharset=utf-8"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)", forHTTPHeaderField: "User-Agent")
+        req.setValue("http://y.qq.com/portal/search.html", forHTTPHeaderField: "Referer")
+        req.timeoutInterval = 15
+        let (data, _) = try await URLSession.shared.data(for: req)
+        // QQ's playlist search marks the payload utf-8 but emits a few invalid bytes inside
+        // user-authored titles, so strict JSON parsing fails — re-decode lossily and retry.
+        let obj = (try? JSONSerialization.jsonObject(with: data))
+            ?? (try? JSONSerialization.jsonObject(with: Data(String(decoding: data, as: UTF8.self).utf8)))
+        guard let json = obj as? [String: Any],
+              let d = json["data"] as? [String: Any],
+              let list = d["list"] as? [[String: Any]] else { return [] }
+        return list.compactMap { item -> SonglistInfo? in
+            guard let idAny = item["dissid"] else { return nil }
+            let creator = item["creator"] as? [String: Any]
             return SonglistInfo(
-                id: id, source: .tx,
-                name: (d["title"] as? String) ?? "未知歌单",
-                author: (creator?["nick"] as? String) ?? "",
-                picURL: (d["cover_url_medium"] as? String) ?? (d["cover_url_big"] as? String),
-                trackCount: (d["song_ids"] as? [Any])?.count,
-                playCount: KuwoSonglistService.formatPlayCount(d["access_num"] as? Int ?? 0)
+                id: String(describing: idAny), source: .tx,
+                name: ((item["dissname"] as? String) ?? "未知歌单").decodingHTMLEntities(),
+                author: ((creator?["name"] as? String) ?? "").decodingHTMLEntities(),
+                picURL: item["imgurl"] as? String,
+                trackCount: item["song_count"] as? Int,
+                playCount: KuwoSonglistService.formatPlayCount(item["listennum"] as? Int ?? 0)
             )
         }
     }
@@ -339,8 +535,9 @@ nonisolated struct KugouSonglistService: SonglistService {
     ]
     private let mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13B143 Safari/601.1"
 
-    func fetchRecommended(order: SonglistOrder, page: Int) async throws -> [SonglistInfo] {
-        let urlStr = "http://www2.kugou.kugou.com/yueku/v9/special/getSpecial?is_ajax=1&cdn=cdn&t=\(order.id)&c=&p=\(page)"
+    func fetchRecommended(order: SonglistOrder, tag: SonglistTag, page: Int) async throws -> [SonglistInfo] {
+        // `c` is the category id; empty ⇒ all categories (recommended).
+        let urlStr = "http://www2.kugou.kugou.com/yueku/v9/special/getSpecial?is_ajax=1&cdn=cdn&t=\(order.id)&c=\(tag.id)&p=\(page)"
         guard let url = URL(string: urlStr) else { return [] }
         var req = URLRequest(url: url)
         req.setValue(mobileUA, forHTTPHeaderField: "User-Agent")
@@ -355,11 +552,60 @@ nonisolated struct KugouSonglistService: SonglistService {
             let img = (d["img"] as? String) ?? (d["imgurl"] as? String)
             return SonglistInfo(
                 id: id, source: .kg,
-                name: (d["specialname"] as? String) ?? "未知歌单",
-                author: (d["nickname"] as? String) ?? "",
+                name: ((d["specialname"] as? String) ?? "未知歌单").decodingHTMLEntities(),
+                author: ((d["nickname"] as? String) ?? "").decodingHTMLEntities(),
                 picURL: img?.replacingOccurrences(of: "{size}", with: "240"),
                 trackCount: d["songcount"] as? Int,
                 playCount: plays
+            )
+        }
+    }
+
+    func fetchTags() async throws -> [SonglistTagGroup] {
+        let urlStr = "http://www2.kugou.kugou.com/yueku/v9/special/getSpecial?is_smarty=1&"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue(mobileUA, forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (json["status"] as? Int) == 1,
+              let d = json["data"] as? [String: Any],
+              let tagids = d["tagids"] as? [String: Any] else { return [] }
+        // `tagids` is keyed by category name; each value has a `.data` array of {id, name}.
+        // (Group order is not guaranteed since JSON objects are unordered in Swift.)
+        return tagids.compactMap { name, value -> SonglistTagGroup? in
+            guard let obj = value as? [String: Any],
+                  let items = obj["data"] as? [[String: Any]] else { return nil }
+            let tags = items.compactMap { item -> SonglistTag? in
+                guard let n = item["name"] as? String, let idAny = item["id"] else { return nil }
+                return SonglistTag(id: String(describing: idAny), name: n)
+            }
+            return tags.isEmpty ? nil : SonglistTagGroup(name: name, tags: tags)
+        }
+    }
+
+    func search(keyword: String, page: Int) async throws -> [SonglistInfo] {
+        let q = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword
+        let urlStr = "http://msearchretry.kugou.com/api/v3/search/special?keyword=\(q)&page=\(page)&pagesize=30&showtype=10&filter=0&version=7910&sver=2"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue(mobileUA, forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let d = json["data"] as? [String: Any],
+              let info = d["info"] as? [[String: Any]] else { return [] }
+        return info.compactMap { item -> SonglistInfo? in
+            guard let sidAny = item["specialid"] else { return nil }
+            let img = (item["imgurl"] as? String) ?? (item["img"] as? String)
+            return SonglistInfo(
+                id: String(describing: sidAny), source: .kg,
+                name: ((item["specialname"] as? String) ?? "未知歌单").decodingHTMLEntities(),
+                author: ((item["nickname"] as? String) ?? "").decodingHTMLEntities(),
+                picURL: img?.replacingOccurrences(of: "{size}", with: "240"),
+                trackCount: item["songcount"] as? Int,
+                playCount: KuwoSonglistService.formatPlayCount(item["playcount"] as? Int ?? 0)
             )
         }
     }
@@ -485,5 +731,85 @@ nonisolated struct KugouSonglistService: SonglistService {
 
     private static func decode(_ s: String) -> String {
         s.replacingOccurrences(of: "&nbsp;", with: " ").replacingOccurrences(of: "&amp;", with: "&")
+    }
+}
+
+// MARK: - Kuwo tolerant JSON
+
+/// Kuwo's `search.kuwo.cn/r.s` endpoint returns JS-object-ish text with unquoted keys even when
+/// `rformat=json` is requested. This mirrors KuwoCatalog's private parser, but pulls out an
+/// arbitrary top-level array (e.g. `abslist`) instead of building tracks.
+fileprivate enum KuwoTolerantJSON {
+    static func array(_ text: String, key: String) -> [[String: Any]] {
+        // Fast path: some responses are already valid JSON.
+        if let data = text.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let arr = obj[key] as? [[String: Any]] { return arr }
+        guard let r = text.range(of: "\(key):") else { return [] }
+        let after = text[r.upperBound...]
+        guard let start = after.firstIndex(of: "[") else { return [] }
+        var depth = 0
+        var end: String.Index?
+        for i in after[start...].indices {
+            let c = after[i]
+            if c == "[" { depth += 1 }
+            else if c == "]" {
+                depth -= 1
+                if depth == 0 { end = i; break }
+            }
+        }
+        guard let endIdx = end else { return [] }
+        let body = quoteKeys(String(after[start...endIdx]))
+        guard let data = body.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        return arr
+    }
+
+    /// Wrap bare identifier keys in double quotes so JSONSerialization accepts the payload.
+    private static func quoteKeys(_ raw: String) -> String {
+        let pattern = #"([{,\s])([A-Za-z_][A-Za-z0-9_]*)\s*:"#
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return raw }
+        let ns = raw as NSString
+        let mutable = NSMutableString(string: raw)
+        let matches = re.matches(in: raw, range: NSRange(location: 0, length: ns.length))
+        for m in matches.reversed() {
+            let prefix = ns.substring(with: m.range(at: 1))
+            let keyName = ns.substring(with: m.range(at: 2))
+            mutable.replaceCharacters(in: m.range, with: "\(prefix)\"\(keyName)\":")
+        }
+        return mutable as String
+    }
+}
+
+// MARK: - HTML entity decoding
+
+nonisolated extension String {
+    /// Decode HTML entities found in platform-supplied titles (e.g. QQ playlist names contain
+    /// `&#32;`/`&#124;`). Mirrors lx-music's `decodeName` (which uses the `he` library) for the
+    /// named + numeric (decimal & hex) entities that actually show up. Cheap no-op without `&`.
+    func decodingHTMLEntities() -> String {
+        guard contains("&") else { return self }
+        var s = self
+        let named: [String: String] = [
+            "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&apos;": "'",
+            "&nbsp;": " ", "&middot;": "·", "&ndash;": "–", "&mdash;": "—", "&hellip;": "…",
+        ]
+        for (k, v) in named { s = s.replacingOccurrences(of: k, with: v) }
+        s = Self.decodeNumeric(s, pattern: #"&#(\d+);"#, radix: 10)
+        s = Self.decodeNumeric(s, pattern: #"&#[xX]([0-9A-Fa-f]+);"#, radix: 16)
+        return s
+    }
+
+    private static func decodeNumeric(_ input: String, pattern: String, radix: Int) -> String {
+        guard input.contains("&#"), let re = try? NSRegularExpression(pattern: pattern) else { return input }
+        let ns = input as NSString
+        let mutable = NSMutableString(string: input)
+        for m in re.matches(in: input, range: NSRange(location: 0, length: ns.length)).reversed() {
+            let digits = ns.substring(with: m.range(at: 1))
+            if let code = UInt32(digits, radix: radix), let scalar = Unicode.Scalar(code) {
+                mutable.replaceCharacters(in: m.range, with: String(scalar))
+            }
+        }
+        return mutable as String
     }
 }
