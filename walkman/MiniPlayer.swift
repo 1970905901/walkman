@@ -20,7 +20,7 @@ struct MiniPlayer: View {
                 }
                 Spacer(minLength: 0)
                 if playback.isBuffering {
-                    ProgressView().scaleEffect(0.7).frame(width: 30, height: 30)
+                    UIKitSpinner(style: .medium).frame(width: 30, height: 30)
                 } else {
                     PlayPauseRing(progress: progress, isPlaying: playback.isPlaying) {
                         playback.togglePlayPause()

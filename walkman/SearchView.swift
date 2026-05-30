@@ -54,7 +54,7 @@ struct SearchView: View {
                 if keyword.isEmpty {
                     emptyState
                 } else if loadingScopes.contains(selectedScope) && (resultsByScope[selectedScope]?.isEmpty ?? true) {
-                    ProgressView().padding(.top, 60)
+                    LoadingPlaceholder()
                 } else if let error, (resultsByScope[selectedScope] ?? []).isEmpty {
                     Text(error).foregroundColor(.red).padding()
                 } else {
@@ -123,7 +123,7 @@ struct SearchView: View {
                             Text(scope.displayName)
                                 .font(.system(size: 13, weight: .semibold))
                             if isLoading {
-                                ProgressView().scaleEffect(0.6).frame(width: 12, height: 12)
+                                UIKitSpinner(style: .medium).scaleEffect(0.6).frame(width: 12, height: 12)
                             } else if let count = resultsByScope[scope]?.count, count > 0 {
                                 Text("\(count)")
                                     .font(.system(size: 11, weight: .semibold))

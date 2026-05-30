@@ -179,7 +179,7 @@ struct PlayerView: View {
     private var lyricsPage: some View {
         Group {
             if loadingLyrics {
-                ProgressView().tint(.white)
+                UIKitSpinner(style: .medium, color: .white)
             } else if lyrics.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "text.alignleft")
@@ -247,7 +247,7 @@ struct PlayerView: View {
                         .frame(width: 76, height: 76)
                         .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
                     if playback.isBuffering {
-                        ProgressView().tint(.black)
+                        UIKitSpinner(style: .medium, color: .black)
                     } else {
                         Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 30, weight: .bold))

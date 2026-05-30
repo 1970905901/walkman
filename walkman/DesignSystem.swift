@@ -180,6 +180,47 @@ struct Artwork: View {
     }
 }
 
+// MARK: - Loading placeholder
+//
+// We bridge `UIActivityIndicatorView` directly instead of using SwiftUI's
+// `ProgressView()`. On iOS 26 the latter is rendered as an indeterminate linear
+// capsule (even with `.progressViewStyle(.circular)`), which combined with our
+// `maxWidth: .infinity` produced a bar stretching edge to edge. The UIKit
+// indicator has a fixed intrinsic size and is always a circular spinner.
+struct UIKitSpinner: UIViewRepresentable {
+    var style: UIActivityIndicatorView.Style = .medium
+    var color: UIColor? = nil
+
+    func makeUIView(context: Context) -> UIActivityIndicatorView {
+        let v = UIActivityIndicatorView(style: style)
+        v.hidesWhenStopped = false
+        if let color { v.color = color }
+        v.startAnimating()
+        return v
+    }
+    func updateUIView(_ uiView: UIActivityIndicatorView, context: Context) {
+        uiView.startAnimating()
+    }
+}
+
+struct LoadingPlaceholder: View {
+    var label: LocalizedStringKey?
+    var topPadding: CGFloat = 60
+
+    var body: some View {
+        VStack(spacing: 10) {
+            UIKitSpinner(style: .medium)
+            if let label {
+                Text(label)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, topPadding)
+    }
+}
+
 // MARK: - Pretty card for grid items
 
 struct GridCard<Content: View>: View {

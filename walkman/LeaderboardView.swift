@@ -24,7 +24,7 @@ struct LeaderboardView: View {
                     .padding(.bottom, DS.Spacing.xs)
             }
             if isLoading && boards.isEmpty {
-                ProgressView().padding(.top, 60)
+                LoadingPlaceholder()
                 Spacer()
             } else {
                 List {
@@ -103,7 +103,7 @@ struct BoardDetailView: View {
     var body: some View {
         Group {
             if isLoading && tracks.isEmpty {
-                ProgressView().padding(.top, 60)
+                LoadingPlaceholder()
             } else if let error, tracks.isEmpty {
                 ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle",
                                        description: Text(error))

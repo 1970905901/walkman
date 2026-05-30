@@ -63,7 +63,7 @@ struct SonglistView: View {
 
             ScrollView {
                 if isLoading && playlists.isEmpty {
-                    ProgressView().padding(.top, 60)
+                    LoadingPlaceholder()
                 } else if let error, playlists.isEmpty {
                     ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle", description: Text(error))
                 } else if playlists.isEmpty && isSearching && !isLoading {
@@ -225,7 +225,7 @@ private struct TagFilterSheet: View {
                         }
                     }
                     if isLoading && groups.isEmpty {
-                        ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                        LoadingPlaceholder(topPadding: 40)
                     } else if !isLoading && groups.isEmpty {
                         Text("暂无筛选项")
                             .font(.system(size: 13))
@@ -347,7 +347,7 @@ struct SonglistDetailView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             } else if isLoading {
-                ProgressView().padding(.top, 60)
+                LoadingPlaceholder()
             } else if let error {
                 ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle", description: Text(error))
             }
