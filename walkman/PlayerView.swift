@@ -3,6 +3,7 @@ import SwiftUI
 struct PlayerView: View {
     @EnvironmentObject var playback: PlaybackEngine
     @EnvironmentObject var sources: SourceManager
+    @EnvironmentObject var settings: SettingsStore
     @Environment(\.dismiss) var dismiss
     @StateObject private var artwork = ArtworkColors()
     @State private var seekValue: Double = 0
@@ -13,6 +14,12 @@ struct PlayerView: View {
     @State private var loadingLyrics = false
     @State private var trackToFavorite: Track?
     @State private var trackToDownload: Track?
+    @State private var dragOffset: CGFloat = 0
+
+    /// Shared selector — see `PlaybackCycleMode` in PlaybackEngine.swift.
+    private var cycleMode: PlaybackCycleMode {
+        PlaybackCycleMode.current(shuffle: playback.shuffle, loop: playback.loopMode)
+    }
 
     var body: some View {
         ZStack {
@@ -36,20 +43,42 @@ struct PlayerView: View {
             .padding(.horizontal, DS.Spacing.l)
         }
         .preferredColorScheme(.dark)
+        .offset(y: dragOffset)
+        // Custom drag-to-dismiss. fullScreenCover doesn't have sheet's built-in swipe-down,
+        // so we re-implement it: track downward drags from the top ~180pt strip (now wider
+        // since the chrome — chevron/menu buttons — is gone), dismiss if >120pt or fast
+        // enough, otherwise spring back.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { v in
+                    if v.startLocation.y < 180 || dragOffset > 0 {
+                        dragOffset = max(0, v.translation.height)
+                    }
+                }
+                .onEnded { v in
+                    if dragOffset > 120 || v.predictedEndTranslation.height > 250 {
+                        dismiss()
+                    } else {
+                        withAnimation(DS.Motion.standard) { dragOffset = 0 }
+                    }
+                }
+        )
         .onAppear {
             sync()
         }
         .onChange(of: playback.currentTrack?.id) { _, _ in sync() }
         .sheet(isPresented: $showQueue) {
             QueueView()
-                .preferredColorScheme(.light)   // sheet stays in normal appearance
                 .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $trackToFavorite) { track in
             AddToPlaylistSheet(track: track)
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $trackToDownload) { track in
             DownloadSheet(track: track)
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -69,21 +98,17 @@ struct PlayerView: View {
 
     // MARK: - Top bar
 
+    /// Dismissal is driven by the drag-down gesture (see `simultaneousGesture` on body),
+    /// so no chevron is needed. The center shows source/quality/origin only when
+    /// `settings.showDebugNotices` is on. The right side carries a chrome-less "⋯"
+    /// menu — anchored where every iOS music app puts secondary actions.
     private var topBar: some View {
-        HStack {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 36, height: 36)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            Spacer()
-            VStack(spacing: 2) {
+        ZStack {
+            if settings.showDebugNotices {
                 HStack(spacing: 5) {
                     Text(playback.currentTrack?.source.displayName ?? "")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(DS.Typo.bodyStrong)
                         .foregroundColor(.white)
-                    // Actual quality being played (after lx-music's getPlayQuality cascade)
                     if let q = playback.currentQuality {
                         Text(QualityBadgeStyle(quality: q).label)
                             .font(.system(size: 10, weight: .heavy, design: .rounded))
@@ -101,18 +126,13 @@ struct PlayerView: View {
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.white.opacity(0.15), in: Capsule())
+                        .background(DS.Glass.thin, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
                     }
                 }
             }
-            Spacer()
-            HStack(spacing: 8) {
-                Button { showQueue = true } label: {
-                    Image(systemName: "list.bullet")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 36, height: 36)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
+            HStack {
+                Spacer()
                 Menu {
                     Button { if let t = playback.currentTrack { trackToFavorite = t } } label: {
                         Label("收藏", systemImage: "heart")
@@ -123,22 +143,29 @@ struct PlayerView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 36, height: 36)
-                        .background(.ultraThinMaterial, in: Circle())
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .frame(width: 44, height: 36)   // generous hit area, no visible chrome
+                        .contentShape(Rectangle())
                 }
                 .disabled(playback.currentTrack == nil)
             }
         }
-        .foregroundColor(.white)
+        .frame(maxWidth: .infinity)
+        .frame(height: 36)
         .padding(.top, 8)
     }
+
 
     private var pageDots: some View {
         HStack(spacing: 6) {
             ForEach(0..<2, id: \.self) { i in
-                Circle()
-                    .fill(Color.white.opacity(page == i ? 0.95 : 0.35))
-                    .frame(width: 6, height: 6)
+                let on = page == i
+                Capsule()
+                    .fill(on
+                          ? AnyShapeStyle(DS.Palette.brandGradient)
+                          : AnyShapeStyle(Color.white.opacity(0.25)))
+                    .frame(width: on ? 22 : 8, height: 4)
+                    .animation(DS.Motion.standard, value: page)
             }
         }
     }
@@ -148,27 +175,30 @@ struct PlayerView: View {
     private var coverPage: some View {
         VStack(spacing: 0) {
             Spacer()
-            ZStack {
-                Artwork(url: playback.currentTrack?.picURL, size: 320, radius: DS.Radius.xlarge)
-                    .shadow(color: .black.opacity(0.45), radius: 30, y: 18)
-                    .scaleEffect(playback.isPlaying ? 1.0 : 0.92)
-                    .animation(.spring(duration: 0.45), value: playback.isPlaying)
-            }
+            // Album art with two-layer shadow: brand-tint glow (from extracted cover color)
+            // bleeds outward, then a darker depth shadow grounds the card.
+            Artwork(url: playback.currentTrack?.picURL, size: 320, radius: DS.Radius.xlarge)
+                .elevation(DS.Elevation.e3(artwork.primary))
+                .shadow(color: .black.opacity(0.35), radius: 14, y: 8)
+                .scaleEffect(playback.isPlaying ? 1.0 : 0.92)
+                .animation(DS.Motion.emphasis, value: playback.isPlaying)
+
             VStack(spacing: 6) {
                 Text(playback.currentTrack?.name ?? "")
-                    .font(.system(size: 22, weight: .bold))
+                    .font(DS.Typo.title)
                     .foregroundColor(.white)
                     .lineLimit(1)
                 Text(playback.currentTrack?.subtitle ?? "")
-                    .font(.system(size: 15))
-                    .foregroundColor(.white.opacity(0.75))
+                    .font(DS.Typo.body)
+                    .foregroundColor(.white.opacity(0.72))
                     .lineLimit(1)
             }
             .padding(.top, DS.Spacing.xl)
+
             AudioWave(active: playback.isPlaying && !playback.isBuffering)
                 .frame(height: 68)
                 .padding(.horizontal, 4)
-                .padding(.top, DS.Spacing.xl)
+                .padding(.top, DS.Spacing.l)
             Spacer()
         }
         .offset(y: -18)
@@ -217,22 +247,24 @@ struct PlayerView: View {
                 Spacer()
                 Text("-" + format(time: max(0, playback.duration - (isSeeking ? seekValue : playback.currentTime))))
             }
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundColor(.white.opacity(0.75))
+            .font(DS.Typo.numeric)
+            .foregroundColor(.white.opacity(0.72))
         }
         .padding(.bottom, DS.Spacing.l)
     }
 
     // MARK: - Controls
 
+    /// Bottom control row. Cycle mode (left) is the combined shuffle/loop selector;
+    /// list.bullet (right) opens the playback queue — both used to live in TopBar.
     private var controlSection: some View {
         HStack {
             Button {
-                playback.shuffle.toggle()
+                cycleMode.advanced().apply(to: playback)
             } label: {
-                Image(systemName: "shuffle")
+                Image(systemName: cycleMode.icon)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(playback.shuffle ? .white : .white.opacity(0.55))
+                    .foregroundColor(.white)
             }
             Spacer()
             Button { playback.previous() } label: {
@@ -243,15 +275,18 @@ struct PlayerView: View {
             Spacer()
             Button { playback.togglePlayPause() } label: {
                 ZStack {
+                    // White disc with a soft cover-color halo so the button feels
+                    // alive with the album art instead of floating in a vacuum.
                     Circle().fill(Color.white)
                         .frame(width: 76, height: 76)
-                        .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+                        .shadow(color: artwork.primary.opacity(0.55), radius: 22, y: 8)
+                        .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
                     if playback.isBuffering {
                         UIKitSpinner(style: .medium, color: .black)
                     } else {
                         Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 30, weight: .bold))
-                            .foregroundColor(.black)
+                            .foregroundStyle(DS.Palette.brandGradient)
                             .offset(x: playback.isPlaying ? 0 : 2)
                     }
                 }
@@ -263,14 +298,10 @@ struct PlayerView: View {
                     .foregroundColor(.white)
             }
             Spacer()
-            Button {
-                let modes = PlaybackEngine.LoopMode.allCases
-                let i = modes.firstIndex(of: playback.loopMode) ?? 0
-                playback.loopMode = modes[(i + 1) % modes.count]
-            } label: {
-                Image(systemName: playback.loopMode.icon)
+            Button { showQueue = true } label: {
+                Image(systemName: "list.bullet")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(playback.loopMode == .off ? .white.opacity(0.55) : .white)
+                    .foregroundColor(.white)
             }
         }
     }
@@ -365,12 +396,22 @@ struct ProgressSlider: View {
     var body: some View {
         GeometryReader { geo in
             let progress = max(0, min(1, (value - range.lowerBound) / max(range.upperBound - range.lowerBound, 1)))
-            let trackHeight: CGFloat = dragging ? 7 : 4
+            let trackHeight: CGFloat = dragging ? 6 : 4
+            let thumbSize: CGFloat = dragging ? 16 : 10
+            let thumbX = geo.size.width * progress
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.22))
+                // Glass track (unfilled): white@18% capsule
+                Capsule().fill(Color.white.opacity(0.18))
                     .frame(height: trackHeight)
-                Capsule().fill(Color.white)
-                    .frame(width: geo.size.width * progress, height: trackHeight)
+                // Filled portion: brand gradient
+                Capsule().fill(DS.Palette.brandGradient)
+                    .frame(width: thumbX, height: trackHeight)
+                // Thumb: white circle that grows on drag (Apple Music feel)
+                Circle()
+                    .fill(.white)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
+                    .offset(x: thumbX - thumbSize / 2)
             }
             .frame(height: 24, alignment: .center)
             .contentShape(Rectangle())
@@ -387,7 +428,7 @@ struct ProgressSlider: View {
                         onChangeEnded()
                     }
             )
-            .animation(.easeOut(duration: 0.15), value: dragging)
+            .animation(DS.Motion.micro, value: dragging)
             .onAppear { lastWidth = geo.size.width }
         }
         .frame(height: 24)
@@ -410,25 +451,7 @@ struct LyricsScroll: View {
                 VStack(spacing: 18) {
                     Color.clear.frame(height: 80)
                     ForEach(Array(lines.enumerated()), id: \.element.id) { idx, line in
-                        VStack(spacing: 4) {
-                            Text(line.text.isEmpty ? "♪" : line.text)
-                                .font(.system(size: idx == active ? 19 : 16, weight: idx == active ? .bold : .regular))
-                                .foregroundColor(idx == active ? .white : .white.opacity(0.45))
-                                .multilineTextAlignment(.center)
-                                .scaleEffect(idx == active ? 1.05 : 1.0)
-                                .animation(.spring(duration: 0.4), value: active)
-                            if let tr = line.translation, !tr.isEmpty {
-                                Text(tr)
-                                    .font(.system(size: idx == active ? 14 : 12))
-                                    .foregroundColor(idx == active ? .white.opacity(0.85) : .white.opacity(0.35))
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .id(line.id)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if line.time >= 0 { onTap(line.time) }
-                        }
+                        LyricRow(line: line, isCurrent: idx == active, activeBinding: active, onTap: onTap)
                     }
                     Color.clear.frame(height: 200)
                 }
@@ -452,6 +475,47 @@ struct LyricsScroll: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Single lyric row. Extracted from the ForEach body because Swift's type checker
+/// times out on the inline conditional `AnyShapeStyle(...)` ternary.
+private struct LyricRow: View {
+    let line: LyricLine
+    let isCurrent: Bool
+    let activeBinding: Int?
+    let onTap: (Double) -> Void
+
+    private var foreground: AnyShapeStyle {
+        isCurrent
+            ? AnyShapeStyle(DS.Palette.brandGradient)
+            : AnyShapeStyle(Color.white.opacity(0.42))
+    }
+
+    private var translationColor: Color {
+        isCurrent ? .white.opacity(0.85) : .white.opacity(0.32)
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(line.text.isEmpty ? "♪" : line.text)
+                .font(isCurrent ? DS.Typo.lyricBig : DS.Typo.lyricSmall)
+                .foregroundStyle(foreground)
+                .multilineTextAlignment(.center)
+                .scaleEffect(isCurrent ? 1.0 : 0.94)
+                .animation(DS.Motion.lyric, value: activeBinding)
+            if let tr = line.translation, !tr.isEmpty {
+                Text(tr)
+                    .font(.system(size: isCurrent ? 14 : 12))
+                    .foregroundColor(translationColor)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .id(line.id)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if line.time >= 0 { onTap(line.time) }
         }
     }
 }

@@ -84,8 +84,10 @@ struct PlayHistoryView: View {
         }
         .overlay {
             if history.tracks.isEmpty {
-                ContentUnavailableView("还没有播放记录", systemImage: "clock.arrow.circlepath",
-                                       description: Text("播放过的歌曲会出现在这里"))
+                BrandedEmpty(icon: "clock.arrow.circlepath",
+                             title: "还没有播放记录",
+                             subtitle: "播放过的歌曲会出现在这里",
+                             topPadding: 80)
             }
         }
         .confirmationDialog("清空播放历史?", isPresented: $showClear, titleVisibility: .visible) {

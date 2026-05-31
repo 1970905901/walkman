@@ -220,7 +220,10 @@ struct DownloadFolderView: View {
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
             if tracks.isEmpty {
-                ContentUnavailableView("还没有下载", systemImage: "arrow.down.circle", description: Text("在播放器或歌曲菜单里下载到这个子歌单"))
+                BrandedEmpty(icon: "arrow.down.circle",
+                             title: "还没有下载",
+                             subtitle: "在播放器或歌曲菜单里下载到这个子歌单",
+                             topPadding: 80)
             }
         }
     }
@@ -281,7 +284,7 @@ struct DownloadsStatusView: View {
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
             if downloads.records.isEmpty {
-                ContentUnavailableView("暂无下载", systemImage: "arrow.down.circle")
+                BrandedEmpty(icon: "arrow.down.circle", title: "暂无下载", topPadding: 80)
             }
         }
     }

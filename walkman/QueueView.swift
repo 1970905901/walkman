@@ -11,8 +11,10 @@ struct QueueView: View {
             VStack(spacing: 0) {
                 modeBar
                 if playback.queue.isEmpty {
-                    ContentUnavailableView("队列空空如也", systemImage: "music.note.list",
-                                           description: Text("从搜索、排行榜或歌单点歌后,接下来播放的歌会显示在这里"))
+                    BrandedEmpty(icon: "music.note.list",
+                                 title: "队列空空如也",
+                                 subtitle: "从搜索、排行榜或歌单点歌后,接下来播放的歌会显示在这里",
+                                 topPadding: 80)
                         .frame(maxHeight: .infinity)
                 } else {
                     List {
@@ -30,11 +32,11 @@ struct QueueView: View {
                                 for i in idxs.sorted(by: >) { playback.removeFromQueue(at: i) }
                             }
                         } header: {
-                            HStack {
-                                Text("接下来播放").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
-                                Spacer()
-                                Text("\(playback.queue.count) 首").font(.caption2).foregroundColor(.secondary)
-                            }
+                            // queue count已经移到 modeBar 右侧,这里只留 section 标题
+                            Text("接下来播放")
+                                .font(DS.Typo.caption)
+                                .foregroundStyle(DS.Palette.textTertiary)
+                                .textCase(nil)   // 防止 List section header 默认全大写
                         }
                     }
                     .listStyle(.plain)
@@ -116,44 +118,31 @@ struct QueueView: View {
         }
     }
 
+    /// Single combined cycle-mode pill (shared with PlayerView controlSection) on the
+    /// left, queue count on the right. Replaces the previous two-button design which
+    /// duplicated controls the PlayerView already exposed.
     private var modeBar: some View {
-        HStack(spacing: 12) {
+        let cycle = PlaybackCycleMode.current(shuffle: playback.shuffle, loop: playback.loopMode)
+        return HStack(spacing: 10) {
             Button {
-                playback.shuffle.toggle()
+                cycle.advanced().apply(to: playback)
             } label: {
-                Label(playback.shuffle ? "随机播放" : "顺序播放", systemImage: "shuffle")
+                Label(cycle.label, systemImage: cycle.icon)
                     .font(.system(size: 13, weight: .semibold))
                     .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(playback.shuffle ? Color.accentColor : Color(.secondarySystemBackground), in: Capsule())
-                    .foregroundColor(playback.shuffle ? .white : .primary)
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                let modes = PlaybackEngine.LoopMode.allCases
-                let i = modes.firstIndex(of: playback.loopMode) ?? 0
-                playback.loopMode = modes[(i + 1) % modes.count]
-            } label: {
-                Label(loopLabel, systemImage: playback.loopMode.icon)
-                    .font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(playback.loopMode == .off ? Color(.secondarySystemBackground) : Color.accentColor, in: Capsule())
-                    .foregroundColor(playback.loopMode == .off ? .primary : .white)
+                    .background(DS.Palette.brandGradient, in: Capsule())
+                    .foregroundColor(.white)
             }
             .buttonStyle(.plain)
             Spacer()
+            if !playback.queue.isEmpty {
+                Text("\(playback.queue.count) 首")
+                    .font(DS.Typo.numeric)
+                    .foregroundStyle(DS.Palette.textTertiary)
+            }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, DS.Spacing.l)
         .padding(.vertical, 10)
-        .background(Color(.systemGroupedBackground))
-    }
-
-    private var loopLabel: String {
-        switch playback.loopMode {
-        case .off: return "不循环"
-        case .all: return "列表循环"
-        case .one: return "单曲循环"
-        }
     }
 
     private func format(_ s: Int) -> String { String(format: "%d:%02d", s / 60, s % 60) }

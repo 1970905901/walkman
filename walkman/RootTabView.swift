@@ -80,7 +80,10 @@ struct RootTabView: View {
         .animation(.spring(duration: 0.3), value: playback.lastError)
         .animation(.spring(duration: 0.3), value: playback.cascadeNotice)
         .animation(.spring(duration: 0.3), value: playback.currentTrack?.id)
-        .sheet(isPresented: $showPlayer) {
+        // fullScreenCover (vs .sheet) gives us a true edge-to-edge dark player. The
+        // built-in slide-up plus our own drag-to-dismiss inside PlayerView covers the
+        // "Hero" feel without the layout-rewriting cost of matchedGeometryEffect.
+        .fullScreenCover(isPresented: $showPlayer) {
             PlayerView()
         }
     }

@@ -27,31 +27,25 @@ struct LeaderboardView: View {
                 LoadingPlaceholder()
                 Spacer()
             } else {
-                List {
-                    Section {
+                // Switched from `List(insetGrouped)` to a ScrollView of cards so the leaderboard
+                // matches the songlist grid's visual language (cover-driven cards) instead of
+                // sitting in a flat iOS Settings-style list.
+                ScrollView {
+                    LazyVStack(spacing: DS.Spacing.m) {
                         ForEach(boards) { board in
                             NavigationLink(value: board) {
-                                HStack(spacing: 12) {
-                                    BoardThumbnail(board: board)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(board.name)
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .lineLimit(1)
-                                        HStack(spacing: 5) {
-                                            SourceChip(source: board.source)
-                                            Text("Top 100").font(.caption2).foregroundColor(.secondary)
-                                        }
-                                    }
-                                }
+                                BoardRow(board: board)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
+                    .padding(.horizontal, DS.Spacing.l)
+                    .padding(.top, DS.Spacing.s)
+                    .padding(.bottom, DS.Spacing.xl)
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .brandedSurface()
         .navigationTitle("排行榜")
         .navigationBarTitleDisplayMode(.large)
         .navigationDestination(for: BoardInfo.self) { board in
@@ -73,6 +67,7 @@ struct LeaderboardView: View {
 
 private struct BoardThumbnail: View {
     let board: BoardInfo
+    var size: CGFloat = 56
     var body: some View {
         AsyncImage(url: board.picURL.flatMap(URL.init(string:))) { phase in
             switch phase {
@@ -82,20 +77,56 @@ private struct BoardThumbnail: View {
                                startPoint: .topLeading, endPoint: .bottomTrailing)
                 .overlay(
                     Text(String(board.name.prefix(2)))
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(.system(size: size * 0.25, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1).minimumScaleFactor(0.5)
                 )
             }
         }
-        .frame(width: 56, height: 56)
+        .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
+    }
+}
+
+/// Single leaderboard card. Glass surface + cover-tinted shadow so each
+/// board has a slight color signature pulled from its source tint.
+private struct BoardRow: View {
+    let board: BoardInfo
+    var body: some View {
+        HStack(spacing: 14) {
+            BoardThumbnail(board: board, size: 64)
+                .elevation(DS.Elevation.e1(board.source.tint))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(board.name)
+                    .font(DS.Typo.bodyStrong)
+                    .foregroundStyle(DS.Palette.textPrimary)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    SourceChip(source: board.source)
+                    Text("Top 100")
+                        .font(DS.Typo.caption2)
+                        .foregroundStyle(DS.Palette.textTertiary)
+                }
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DS.Palette.textTertiary)
+        }
+        .padding(DS.Spacing.m)
+        .background(DS.Glass.thin, in: RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous)
+                .strokeBorder(DS.Palette.strokeSubtle, lineWidth: 0.5)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous))
     }
 }
 
 struct BoardDetailView: View {
     let board: BoardInfo
     @EnvironmentObject var playback: PlaybackEngine
+    @StateObject private var artwork = ArtworkColors()
     @State private var tracks: [Track] = []
     @State private var isLoading = false
     @State private var error: String?
@@ -111,11 +142,16 @@ struct BoardDetailView: View {
                 List {
                     Section {
                         HStack(spacing: 14) {
-                            BoardThumbnail(board: board)
-                                .frame(width: 96, height: 96)
+                            BoardThumbnail(board: board, size: 96)
+                                .elevation(DS.Elevation.e2(artwork.primary))
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(board.name).font(.title3.bold()).lineLimit(2)
-                                Text("\(tracks.count) 首歌曲").font(.subheadline).foregroundColor(.secondary)
+                                Text(board.name)
+                                    .font(.system(size: 19, weight: .bold))
+                                    .foregroundStyle(DS.Palette.textPrimary)
+                                    .lineLimit(2)
+                                Text("\(tracks.count) 首歌曲")
+                                    .font(DS.Typo.numeric)
+                                    .foregroundStyle(DS.Palette.textTertiary)
                                 if !tracks.isEmpty {
                                     Button {
                                         playback.play(track: tracks[0], in: tracks, startIndex: 0)
@@ -132,16 +168,18 @@ struct BoardDetailView: View {
                             }
                             Spacer(minLength: 0)
                         }
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, DS.Spacing.l)
+                        .padding(.vertical, DS.Spacing.m)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
                     }
                     Section {
                         ForEach(Array(tracks.enumerated()), id: \.element.id) { idx, t in
                             HStack(alignment: .center, spacing: 4) {
                                 Text("\(idx + 1)")
-                                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                                    .foregroundColor(.secondary)
+                                    .font(DS.Typo.numeric)
+                                    .foregroundStyle(DS.Palette.textTertiary)
                                     .frame(width: 28)
                                 TrackRow(track: t)
                             }
@@ -159,10 +197,27 @@ struct BoardDetailView: View {
                 .scrollContentBackground(.hidden)
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)   // see SonglistDetailView — without this the .background only paints LoadingPlaceholder's own ~70pt strip
+        .background(
+            ZStack {
+                DS.Palette.bgBase
+                // Only show cover-tint backdrop after tracks have loaded — otherwise a
+                // bare color band appears above the loading spinner, looks like a UI glitch.
+                if !tracks.isEmpty {
+                    LinearGradient(
+                        colors: [artwork.primary.opacity(0.55), artwork.secondary.opacity(0.15), .clear],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .ignoresSafeArea(edges: .top)
+                    .transition(.opacity)
+                }
+            }
+            .animation(DS.Motion.standard, value: tracks.isEmpty)
+        )
         .navigationTitle(board.name)
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            artwork.extract(from: board.picURL)
             guard tracks.isEmpty, !isLoading else { return }
             isLoading = true
             defer { isLoading = false }

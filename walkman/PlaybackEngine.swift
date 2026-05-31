@@ -758,3 +758,47 @@ final class PlaybackEngine: ObservableObject {
         return cascade.dropFirst(idx + 1).first
     }
 }
+
+/// User-facing three-state cycle selector. Combines the underlying `shuffle: Bool`
+/// and `LoopMode` so the UI can present a single button that walks through
+/// 顺序循环 → 单曲循环 → 随机循环 (and back). Shared between PlayerView's
+/// control row and QueueView's mode bar so both stay in lockstep.
+enum PlaybackCycleMode: CaseIterable {
+    case sequence
+    case single
+    case shuffle
+
+    var icon: String {
+        switch self {
+        case .sequence: return "repeat"
+        case .single:   return "repeat.1"
+        case .shuffle:  return "shuffle"
+        }
+    }
+    var label: String {
+        switch self {
+        case .sequence: return "顺序循环"
+        case .single:   return "单曲循环"
+        case .shuffle:  return "随机循环"
+        }
+    }
+    static func current(shuffle: Bool, loop: PlaybackEngine.LoopMode) -> PlaybackCycleMode {
+        if shuffle { return .shuffle }
+        if loop == .one { return .single }
+        return .sequence   // both .all and legacy .off collapse to "sequence" for UI purposes
+    }
+    func advanced() -> PlaybackCycleMode {
+        switch self {
+        case .sequence: return .single
+        case .single:   return .shuffle
+        case .shuffle:  return .sequence
+        }
+    }
+    func apply(to playback: PlaybackEngine) {
+        switch self {
+        case .sequence: playback.shuffle = false; playback.loopMode = .all
+        case .single:   playback.shuffle = false; playback.loopMode = .one
+        case .shuffle:  playback.shuffle = true;  playback.loopMode = .all
+        }
+    }
+}

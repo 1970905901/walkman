@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct walkmanApp: App {
@@ -10,9 +11,30 @@ struct walkmanApp: App {
     @StateObject private var downloads = DownloadStore.shared
     @StateObject private var history = PlayHistoryStore()
 
+    init() {
+        configureAppearance()
+    }
+
+    /// Global UIKit appearance: rounded inline titles + PingFang large titles to give
+    /// Chinese headings real character (default SF Pro renders 汉字 with the system
+    /// fallback, which looks generic). Tint stays driven by AccentColor.
+    private func configureAppearance() {
+        let nav = UINavigationBarAppearance()
+        nav.configureWithDefaultBackground()
+        let inlineFont = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        let largeFont = UIFont(name: "PingFangSC-Semibold", size: 32)
+            ?? UIFont.systemFont(ofSize: 32, weight: .bold)
+        nav.titleTextAttributes = [.font: inlineFont]
+        nav.largeTitleTextAttributes = [.font: largeFont]
+        UINavigationBar.appearance().standardAppearance = nav
+        UINavigationBar.appearance().scrollEdgeAppearance = nav
+        UINavigationBar.appearance().compactAppearance = nav
+    }
+
     var body: some Scene {
         WindowGroup {
             RootTabView()
+                .tint(DS.Palette.brandStart)   // iOS 26 SwiftUI no longer auto-pulls AccentColor for every control; set it explicitly at the root.
                 .environmentObject(playback)
                 .environmentObject(sources)
                 .environmentObject(playlists)

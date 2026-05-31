@@ -67,9 +67,9 @@ struct SonglistView: View {
                 } else if let error, playlists.isEmpty {
                     ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle", description: Text(error))
                 } else if playlists.isEmpty && isSearching && !isLoading {
-                    ContentUnavailableView("没有找到歌单", systemImage: "magnifyingglass",
-                                           description: Text("换个关键字或切换音源试试"))
-                        .padding(.top, 30)
+                    BrandedEmpty(icon: "magnifyingglass",
+                                 title: "没有找到歌单",
+                                 subtitle: "换个关键字或切换音源试试")
                 } else {
                     LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(playlists) { list in
@@ -84,7 +84,7 @@ struct SonglistView: View {
                 }
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .brandedSurface()
         .navigationTitle("歌单")
         .navigationBarTitleDisplayMode(.large)
         .navigationDestination(for: SonglistInfo.self) { info in
@@ -107,6 +107,7 @@ struct SonglistView: View {
                 selectedTag = tag
             }
             .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -280,28 +281,32 @@ private struct SonglistCard: View {
                 }
                 .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous))
-                .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+                .elevation(DS.Elevation.e2(info.source.tint))   // tint the lift with the source's brand color so kw/wy/kg/tx feel subtly different at scale
 
                 if let plays = info.playCount {
                     HStack(spacing: 3) {
-                        Image(systemName: "play.fill").font(.system(size: 8, weight: .bold))
-                        Text(plays).font(.system(size: 10, weight: .semibold))
+                        Image(systemName: "play.fill").font(.system(size: 9, weight: .bold))
+                        Text(plays).font(.system(size: 10, weight: .semibold)).monospacedDigit()
                     }
                     .foregroundColor(.white)
-                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    // Solid translucent black — overlays on photos always read against any
+                    // cover (Apple Photos / TikTok / 抖音 use this exact treatment).
+                    // .thickMaterial in light mode rendered white-on-white and was unreadable.
                     .background(Color.black.opacity(0.55), in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
                     .padding(8)
                 }
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(info.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(DS.Palette.textPrimary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(info.author.isEmpty ? info.source.displayName : info.author)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .font(DS.Typo.caption2)
+                    .foregroundStyle(DS.Palette.textTertiary)
                     .lineLimit(1)
             }
         }
@@ -324,13 +329,14 @@ struct SonglistDetailView: View {
                         header(detail: detail)
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())  // header bleeds to edges so the cover-color backdrop fills the width
                     }
                     Section {
                         ForEach(Array(detail.tracks.enumerated()), id: \.element.id) { idx, t in
                             HStack(alignment: .center, spacing: 4) {
                                 Text("\(idx + 1)")
-                                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                                    .foregroundColor(.secondary)
+                                    .font(DS.Typo.numeric)
+                                    .foregroundStyle(DS.Palette.textTertiary)
                                     .frame(width: 28)
                                 TrackRow(track: t)
                             }
@@ -352,7 +358,27 @@ struct SonglistDetailView: View {
                 ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle", description: Text(error))
             }
         }
-        .background(Color(.systemGroupedBackground))
+        // Stretch to the full safe area so .background paints the whole screen during
+        // loading/error states. Without this, Group sizes to LoadingPlaceholder's own
+        // ~70pt height and the backdrop renders as a narrow band in the middle.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Background: cover color glow over base surface — gives the detail page a
+        // sense of place. Only kicks in once detail loads so the loading state doesn't
+        // flash a bare color band over the spinner.
+        .background(
+            ZStack {
+                DS.Palette.bgBase
+                if detail != nil {
+                    LinearGradient(
+                        colors: [artwork.primary.opacity(0.55), artwork.secondary.opacity(0.15), .clear],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .ignoresSafeArea(edges: .top)
+                    .transition(.opacity)
+                }
+            }
+            .animation(DS.Motion.standard, value: detail == nil)
+        )
         .navigationTitle(detail?.info.name ?? info.name)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -383,14 +409,19 @@ struct SonglistDetailView: View {
             }
             .frame(width: 110, height: 110)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
+            .elevation(DS.Elevation.e2(artwork.primary))
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(detail.info.name).font(.system(size: 17, weight: .bold)).lineLimit(3)
+                Text(detail.info.name)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(DS.Palette.textPrimary)
+                    .lineLimit(3)
                 if !detail.info.author.isEmpty {
-                    Text(detail.info.author).font(.subheadline).foregroundColor(.secondary).lineLimit(1)
+                    Text(detail.info.author).font(.subheadline).foregroundStyle(DS.Palette.textSecondary).lineLimit(1)
                 }
                 Text("\(detail.tracks.count) 首")
-                    .font(.subheadline).foregroundColor(.secondary)
+                    .font(DS.Typo.numeric)
+                    .foregroundStyle(DS.Palette.textTertiary)
                 if !detail.tracks.isEmpty {
                     Button {
                         playback.play(track: detail.tracks[0], in: detail.tracks, startIndex: 0)
@@ -408,6 +439,7 @@ struct SonglistDetailView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, DS.Spacing.l)
+        .padding(.vertical, DS.Spacing.m)
     }
 }

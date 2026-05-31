@@ -68,7 +68,7 @@ struct LibraryView: View {
             }
             .padding(.vertical, DS.Spacing.m)
         }
-        .background(Color(.systemGroupedBackground))
+        .brandedSurface()
         .navigationTitle("我的")
         .navigationBarTitleDisplayMode(.large)
         .navigationDestination(for: UUID.self) { id in

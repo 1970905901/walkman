@@ -60,9 +60,9 @@ struct SearchView: View {
                 } else {
                     let results = resultsByScope[selectedScope] ?? []
                     if results.isEmpty {
-                        ContentUnavailableView("没有找到歌曲", systemImage: "music.note.list",
-                                               description: Text("换个关键字或切换音源试试"))
-                            .padding(.top, 30)
+                        BrandedEmpty(icon: "music.note.list",
+                                     title: "没有找到歌曲",
+                                     subtitle: "换个关键字或切换音源试试")
                     } else {
                         resultsList(results)
                     }
@@ -70,7 +70,7 @@ struct SearchView: View {
             }
             .frame(maxHeight: .infinity)
         }
-        .background(Color(.systemGroupedBackground))
+        .brandedSurface()
         .navigationTitle("搜索")
         .navigationBarTitleDisplayMode(.large)
     }
@@ -176,16 +176,10 @@ struct SearchView: View {
                         keyword = tag; searchAll(); searchFocused = false
                     }
                 }
-                VStack(spacing: 12) {
-                    Image(systemName: "music.mic").font(.system(size: 48, weight: .light)).foregroundColor(.secondary.opacity(0.6))
-                    Text("发现你喜欢的音乐").font(.system(size: 17, weight: .semibold))
-                    Text("可在多个音源中搜索,自定义脚本提供高品质播放地址")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 24)
+                BrandedEmpty(icon: "music.mic",
+                             title: "发现你喜欢的音乐",
+                             subtitle: "可在多个音源中搜索,自定义脚本提供高品质播放地址",
+                             topPadding: history.isEmpty ? 80 : 24)
             }
             .padding(.horizontal, DS.Spacing.l)
             .padding(.top, DS.Spacing.l)
@@ -444,8 +438,14 @@ struct TrackRowSwipe: ViewModifier {
                     Button(role: .destructive, action: onRemove) { Label("移除", systemImage: "trash") }
                 }
             }
-            .sheet(isPresented: $showAdd) { AddToPlaylistSheet(track: track) }
-            .sheet(isPresented: $showDownload) { DownloadSheet(track: track) }
+            .sheet(isPresented: $showAdd) {
+                AddToPlaylistSheet(track: track)
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showDownload) {
+                DownloadSheet(track: track)
+                    .presentationDragIndicator(.visible)
+            }
     }
 }
 

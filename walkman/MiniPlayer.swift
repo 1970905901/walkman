@@ -35,13 +35,13 @@ struct MiniPlayer: View {
             }
             .padding(.horizontal, DS.Spacing.s)
             .padding(.vertical, 6)
-            .background(.ultraThinMaterial)
+            .background(DS.Glass.mid)   // mid pane — heavier than .ultraThin so the mini player reads as a "surface" against any underlying content
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
+                    .stroke(DS.Palette.strokeSubtle, lineWidth: 0.5)
             )
-            .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
+            .elevation(DS.Elevation.e2())
             .padding(.horizontal, DS.Spacing.s)
             .contentShape(Rectangle())
             .onTapGesture { onTap() }
@@ -63,17 +63,17 @@ private struct PlayPauseRing: View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .stroke(Color.primary.opacity(0.12), lineWidth: 2)
+                    .stroke(DS.Palette.strokeStrong, lineWidth: 2)
                     .frame(width: 30, height: 30)
                 Circle()
                     .trim(from: 0, to: progress)
-                    .stroke(Color.accentColor, style: .init(lineWidth: 2, lineCap: .round))
+                    .stroke(DS.Palette.brandStart, style: .init(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .frame(width: 30, height: 30)
                     .animation(.linear(duration: 0.4), value: progress)
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 12, weight: .heavy))
-                    .foregroundColor(.primary)
+                    .foregroundStyle(DS.Palette.brandGradient)
             }
         }
         .buttonStyle(.plain)

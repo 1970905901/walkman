@@ -6,12 +6,14 @@ import Combine
 
 enum DS {
     enum Spacing {
+        static let hair: CGFloat = 2
         static let xs: CGFloat = 4
         static let s: CGFloat = 8
         static let m: CGFloat = 12
         static let l: CGFloat = 16
         static let xl: CGFloat = 24
         static let xxl: CGFloat = 32
+        static let xxxl: CGFloat = 44
     }
     enum Radius {
         static let small: CGFloat = 8
@@ -25,6 +27,102 @@ enum DS {
         static let trackTitle = Font.system(size: 16, weight: .semibold)
         static let trackSubtitle = Font.system(size: 13, weight: .regular)
         static let chip = Font.system(size: 11, weight: .semibold)
+    }
+
+    // MARK: New v1 visual tokens (Liquid Glass + cover-driven, dark-led).
+    // Old tokens above are kept for back-compat; new code should prefer these.
+
+    enum Palette {
+        // Brand — warm orange → red gradient. Single AccentColor in Assets covers
+        // system controls (Tab bar selection, Link, .borderedProminent, etc.).
+        static let brandStart = Color(red: 1.00, green: 0.48, blue: 0.27)   // #FF7A45
+        static let brandEnd   = Color(red: 1.00, green: 0.24, blue: 0.35)   // #FF3D5A
+        static let brand      = Color.accentColor
+        static let brandGradient = LinearGradient(
+            colors: [brandStart, brandEnd],
+            startPoint: .topLeading, endPoint: .bottomTrailing
+        )
+
+        // Surfaces — light/dark pairs defined as Color Sets in Assets.
+        static let bgBase       = Color("BGBase")
+        static let bgElevated   = Color("BGElevated")
+        static let bgSunken     = Color("BGSunken")
+        static let strokeSubtle = Color("StrokeSubtle")
+        static let strokeStrong = Color("StrokeStrong")
+
+        // Text
+        static let textPrimary   = Color("TextPrimary")
+        static let textSecondary = Color("TextSecondary")
+        static let textTertiary  = Color("TextTertiary")
+    }
+
+    /// Three-step glass material scale. Use base material as the body; layer a
+    /// brand or cover tint on top for state. Don't introduce new opacity values.
+    enum Glass {
+        static let thin: Material = .ultraThinMaterial      // chips, mini cards
+        static let mid: Material = .regularMaterial         // sheets, mini player
+        static let heavy: Material = .thickMaterial         // full-player overlays
+    }
+
+    /// Three elevation levels. Helpers attach a shadow tinted to the supplied color
+    /// (defaults to black) so cover-color shadows work cleanly on the player.
+    enum Elevation {
+        static func e1(_ color: Color = .black) -> ShadowSpec {
+            ShadowSpec(color: color.opacity(0.08), radius: 6, y: 2)
+        }
+        static func e2(_ color: Color = .black) -> ShadowSpec {
+            ShadowSpec(color: color.opacity(0.14), radius: 14, y: 6)
+        }
+        static func e3(_ color: Color = .black) -> ShadowSpec {
+            ShadowSpec(color: color.opacity(0.22), radius: 32, y: 12)
+        }
+    }
+
+    /// One motion language. Pick the closest preset rather than inventing new timings.
+    enum Motion {
+        static let micro    = Animation.easeOut(duration: 0.18)                        // chip / focus
+        static let standard = Animation.spring(response: 0.36, dampingFraction: 0.82)  // page / sheet
+        static let emphasis = Animation.spring(response: 0.55, dampingFraction: 0.78)  // hero / scale
+        static let lyric    = Animation.easeInOut(duration: 0.28)
+    }
+
+    /// Type scale used by v1+ surfaces. Named `Typo` (not `Type`) because Swift
+    /// reserves `.Type` for metatype access. Numbers use monospacedDigit so
+    /// time / counts / ranks don't jitter as values change.
+    enum Typo {
+        static let display     = Font.system(size: 34, weight: .bold,    design: .rounded)
+        static let title       = Font.system(size: 22, weight: .bold,    design: .rounded)
+        static let bodyStrong  = Font.system(size: 16, weight: .semibold)
+        static let body        = Font.system(size: 15, weight: .regular)
+        static let caption     = Font.system(size: 12, weight: .medium)
+        static let caption2    = Font.system(size: 11, weight: .regular)
+        static let numeric     = Font.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit()
+        static let lyricBig    = Font.system(size: 26, weight: .bold)
+        static let lyricSmall  = Font.system(size: 17, weight: .medium)
+    }
+}
+
+/// Plain value type so callers can store and re-apply a shadow preset.
+struct ShadowSpec {
+    let color: Color
+    let radius: CGFloat
+    let y: CGFloat
+}
+
+extension View {
+    /// Apply a `ShadowSpec` from `DS.Elevation`. Use instead of raw `.shadow(...)`
+    /// for any surface that needs to participate in the elevation scale.
+    func elevation(_ spec: ShadowSpec) -> some View {
+        shadow(color: spec.color, radius: spec.radius, x: 0, y: spec.y)
+    }
+
+    /// Top-level tab surface: a brand gradient wash on top of the base. Dark mode
+    /// uses heavier opacity so the wash actually reads on a deep background;
+    /// light mode is half-strength so it stays Apple-Music-restrained rather than
+    /// going full朝霞-pink. Detail pages use a stronger cover-driven gradient
+    /// (~55%) for immersion.
+    func brandedSurface() -> some View {
+        modifier(BrandedSurfaceModifier())
     }
 }
 
@@ -79,17 +177,22 @@ struct ChipBar<T: Hashable>: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
                         .background(
-                            Capsule().fill(on ? Color.accentColor : Color(.secondarySystemBackground))
+                            Capsule().fill(on
+                                           ? AnyShapeStyle(DS.Palette.brandGradient)
+                                           : AnyShapeStyle(Color(.secondarySystemBackground)))
                         )
                         .contentShape(Capsule())
                         .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.15)) { selection = item }
+                            withAnimation(DS.Motion.micro) { selection = item }
                         }
                 }
             }
             .padding(.horizontal, DS.Spacing.l)
             .padding(.vertical, 2)
         }
+        // Subtle haptic on every selection change — the kind of "click" Apple uses on
+        // segmented controls. Doesn't fire on the initial value, only on change.
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }
 
@@ -203,6 +306,35 @@ struct UIKitSpinner: UIViewRepresentable {
     }
 }
 
+/// Backs `View.brandedSurface()`. Pulled out as a ViewModifier so it can read
+/// `@Environment(\.colorScheme)` and pick per-scheme opacities — light mode gets a
+/// ~50% lighter wash than dark so it doesn't read as "朝霞 pink" against a near-white
+/// base.
+private struct BrandedSurfaceModifier: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        let topOpacity: Double = scheme == .dark ? 0.14 : 0.07
+        let midOpacity: Double = scheme == .dark ? 0.06 : 0.03
+        let farOpacity: Double = scheme == .dark ? 0.02 : 0.01
+        content.background(
+            ZStack {
+                DS.Palette.bgBase
+                LinearGradient(
+                    stops: [
+                        .init(color: DS.Palette.brandStart.opacity(topOpacity), location: 0.00),
+                        .init(color: DS.Palette.brandEnd.opacity(midOpacity),   location: 0.35),
+                        .init(color: DS.Palette.brandEnd.opacity(farOpacity),   location: 0.70),
+                        .init(color: .clear,                                     location: 1.00),
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .ignoresSafeArea()
+            }
+        )
+    }
+}
+
 struct LoadingPlaceholder: View {
     var label: LocalizedStringKey?
     var topPadding: CGFloat = 60
@@ -218,6 +350,44 @@ struct LoadingPlaceholder: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, topPadding)
+    }
+}
+
+/// Branded empty state with a soft brand-gradient icon halo.
+/// Use instead of bare `ContentUnavailableView` for primary surfaces (search/songlist/library)
+/// to keep voice & visual treatment consistent.
+struct BrandedEmpty: View {
+    let icon: String
+    let title: LocalizedStringKey
+    var subtitle: LocalizedStringKey?
+    var topPadding: CGFloat = 40
+
+    var body: some View {
+        VStack(spacing: DS.Spacing.m) {
+            ZStack {
+                Circle()
+                    .fill(DS.Palette.brandGradient)
+                    .frame(width: 64, height: 64)
+                    .opacity(0.18)
+                Image(systemName: icon)
+                    .font(.system(size: 26, weight: .regular))
+                    .foregroundStyle(DS.Palette.brandGradient)
+            }
+            VStack(spacing: 4) {
+                Text(title)
+                    .font(DS.Typo.bodyStrong)
+                    .foregroundStyle(DS.Palette.textPrimary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(DS.Typo.caption)
+                        .foregroundStyle(DS.Palette.textTertiary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, topPadding)
+        .padding(.horizontal, DS.Spacing.xl)
     }
 }
 

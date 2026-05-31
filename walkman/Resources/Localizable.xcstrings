@@ -924,6 +924,7 @@
       }
     },
     "随机播放" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -954,6 +955,7 @@
       }
     },
     "顺序播放" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
