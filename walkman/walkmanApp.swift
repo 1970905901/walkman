@@ -10,6 +10,15 @@ struct walkmanApp: App {
     @StateObject private var settings = SettingsStore()
     @StateObject private var downloads = DownloadStore.shared
     @StateObject private var history = PlayHistoryStore()
+    @StateObject private var sleepTimer = SleepTimer()
+    @StateObject private var recents = RecentTracksRecorder()
+    /// Bridges Darwin notifications from the widget's transport-button intents
+    /// back into PlaybackEngine. Init-once, no UI state.
+    private let commandBridge = CommandBridge()
+    /// Cold-launch brand splash; auto-dismissed shortly after the root scene
+    /// appears so the user lands on the app proper without seeing a fresh blank
+    /// frame between system LaunchScreen and content.
+    @State private var showSplash = true
 
     init() {
         configureAppearance()
@@ -33,16 +42,34 @@ struct walkmanApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootTabView()
-                .tint(DS.Palette.brandStart)   // iOS 26 SwiftUI no longer auto-pulls AccentColor for every control; set it explicitly at the root.
-                .environmentObject(playback)
-                .environmentObject(sources)
-                .environmentObject(playlists)
-                .environmentObject(scripts)
-                .environmentObject(settings)
-                .environmentObject(downloads)
-                .environmentObject(history)
-                .task { await bootstrap() }
+            ZStack {
+                RootTabView()
+                    .tint(DS.Palette.brandStart)   // iOS 26 SwiftUI no longer auto-pulls AccentColor for every control; set it explicitly at the root.
+                    .environmentObject(playback)
+                    .environmentObject(sources)
+                    .environmentObject(playlists)
+                    .environmentObject(scripts)
+                    .environmentObject(settings)
+                    .environmentObject(downloads)
+                    .environmentObject(history)
+                    .environmentObject(sleepTimer)
+
+                if showSplash {
+                    SplashView()
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
+            }
+            .task {
+                sleepTimer.bind(to: playback)
+                recents.bind(to: playback)
+                commandBridge.start(playback: playback, sources: sources)
+                await bootstrap()
+                // Splash lives for ~900ms — long enough for the spring reveal,
+                // short enough not to feel like a wait.
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                withAnimation(.easeInOut(duration: 0.32)) { showSplash = false }
+            }
         }
     }
 

@@ -25,7 +25,7 @@ struct ScriptManagerView: View {
                 ContentUnavailableView(
                     "暂无自定义脚本",
                     systemImage: "doc.text",
-                    description: Text("点击右上角 + 从 URL 或粘贴板导入 lx-music v4 用户脚本")
+                    description: Text("点击右上角 + 从 URL 或粘贴板导入脚本")
                 )
             } else {
                 ForEach(scripts.scripts) { script in

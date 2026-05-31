@@ -9,6 +9,16 @@
 	<key>com.apple.developer.icloud-services</key>
 	<array>
 		<string>CloudKit</string>
+		<string>CloudDocuments</string>
+	</array>
+	<!-- iCloud Key-Value storage — without this, NSUbiquitousKeyValueStore writes
+	     succeed locally but never propagate to other devices / fresh installs.
+	     The $(...) macros are substituted by Xcode at codesign time. -->
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.heartbeat.walkman</string>
 	</array>
 </dict>
 </plist>

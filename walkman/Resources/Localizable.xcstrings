@@ -14,6 +14,9 @@
         }
       }
     },
+    "%lld 分钟后" : {
+
+    },
     "%lld 首" : {
       "localizations" : {
         "en" : {
@@ -49,6 +52,9 @@
           }
         }
       }
+    },
+    "walkman" : {
+
     },
     "上次同步" : {
       "localizations" : {
@@ -120,6 +126,9 @@
         }
       }
     },
+    "从歌单移除" : {
+
+    },
     "使用 iCloud Key-Value 同步歌单和设置(脚本本身不上传)" : {
       "localizations" : {
         "en" : {
@@ -171,6 +180,9 @@
         }
       }
     },
+    "分享" : {
+
+    },
     "创建" : {
       "localizations" : {
         "en" : {
@@ -211,6 +223,9 @@
         }
       }
     },
+    "到点后自动暂停播放" : {
+
+    },
     "加载失败" : {
       "localizations" : {
         "en" : {
@@ -240,6 +255,9 @@
           }
         }
       }
+    },
+    "取消定时" : {
+
     },
     "可在多个音源中搜索,自定义脚本提供高品质播放地址" : {
       "localizations" : {
@@ -280,6 +298,9 @@
           }
         }
       }
+    },
+    "复制歌曲信息" : {
+
     },
     "失败" : {
       "localizations" : {
@@ -400,6 +421,9 @@
           }
         }
       }
+    },
+    "当前歌曲结束后" : {
+
     },
     "我的" : {
       "localizations" : {
@@ -733,14 +757,24 @@
       }
     },
     "点击右上角 + 从 URL 或粘贴板导入 lx-music v4 用户脚本" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tap + in the top-right to import a script from a URL or the clipboard"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
             "state" : "translated",
-            "value" : "Tap + in the top-right to import an lx-music v4 user script from a URL or the clipboard"
+            "value" : "点击右上角 + 从 URL 或粘贴板导入脚本"
           }
         }
       }
+    },
+    "点击右上角 + 从 URL 或粘贴板导入脚本" : {
+
     },
     "版本" : {
       "localizations" : {
@@ -751,6 +785,15 @@
           }
         }
       }
+    },
+    "睡眠 · %@" : {
+
+    },
+    "睡眠 · 当前歌曲结束" : {
+
+    },
+    "睡眠定时" : {
+
     },
     "移除" : {
       "localizations" : {
@@ -922,6 +965,9 @@
           }
         }
       }
+    },
+    "随便听" : {
+
     },
     "随机播放" : {
       "extractionState" : "stale",

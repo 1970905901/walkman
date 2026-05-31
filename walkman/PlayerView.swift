@@ -4,8 +4,10 @@ struct PlayerView: View {
     @EnvironmentObject var playback: PlaybackEngine
     @EnvironmentObject var sources: SourceManager
     @EnvironmentObject var settings: SettingsStore
+    @EnvironmentObject var sleepTimer: SleepTimer
     @Environment(\.dismiss) var dismiss
     @StateObject private var artwork = ArtworkColors()
+    @State private var showSleepSheet = false
     @State private var seekValue: Double = 0
     @State private var isSeeking: Bool = false
     @State private var page: Int = 0  // 0 = cover, 1 = lyrics
@@ -80,6 +82,11 @@ struct PlayerView: View {
             DownloadSheet(track: track)
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showSleepSheet) {
+            SleepTimerSheet()
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private func sync() {
@@ -140,6 +147,18 @@ struct PlayerView: View {
                     Button { if let t = playback.currentTrack { trackToDownload = t } } label: {
                         Label("下载", systemImage: "arrow.down.circle")
                     }
+                    Divider()
+                    Button { showSleepSheet = true } label: {
+                        // Active timer shows its label so the user can see what's armed at a glance.
+                        switch sleepTimer.mode {
+                        case .duration:
+                            Label("睡眠 · \(sleepTimer.countdownText ?? "")", systemImage: "moon.zzz.fill")
+                        case .endOfTrack:
+                            Label("睡眠 · 当前歌曲结束", systemImage: "moon.zzz.fill")
+                        case .none:
+                            Label("睡眠定时", systemImage: "moon.zzz")
+                        }
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 18, weight: .semibold))
@@ -175,27 +194,42 @@ struct PlayerView: View {
     private var coverPage: some View {
         VStack(spacing: 0) {
             Spacer()
-            // Album art with two-layer shadow: brand-tint glow (from extracted cover color)
-            // bleeds outward, then a darker depth shadow grounds the card.
-            Artwork(url: playback.currentTrack?.picURL, size: 320, radius: DS.Radius.xlarge)
-                .elevation(DS.Elevation.e3(artwork.primary))
-                .shadow(color: .black.opacity(0.35), radius: 14, y: 8)
-                .scaleEffect(playback.isPlaying ? 1.0 : 0.92)
-                .animation(DS.Motion.emphasis, value: playback.isPlaying)
+            // Album art + title/subtitle wrapped in one id'd container so SwiftUI
+            // crossfades the whole "track identity" block when the song changes,
+            // instead of hard-cutting on each property update. Scale on the way in
+            // gives a tiny "rise" — feels like the new song settled into place.
+            ZStack {
+                if let track = playback.currentTrack {
+                    VStack(spacing: 0) {
+                        Artwork(url: track.picURL, size: 320, radius: DS.Radius.xlarge)
+                            .elevation(DS.Elevation.e3(artwork.primary))
+                            .shadow(color: .black.opacity(0.35), radius: 14, y: 8)
+                            .scaleEffect(playback.isPlaying ? 1.0 : 0.92)
+                            .animation(DS.Motion.emphasis, value: playback.isPlaying)
 
-            VStack(spacing: 6) {
-                Text(playback.currentTrack?.name ?? "")
-                    .font(DS.Typo.title)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                Text(playback.currentTrack?.subtitle ?? "")
-                    .font(DS.Typo.body)
-                    .foregroundColor(.white.opacity(0.72))
-                    .lineLimit(1)
+                        VStack(spacing: 6) {
+                            Text(track.name)
+                                .font(DS.Typo.title)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            Text(track.subtitle)
+                                .font(DS.Typo.body)
+                                .foregroundColor(.white.opacity(0.72))
+                                .lineLimit(1)
+                        }
+                        .padding(.top, DS.Spacing.xl)
+                    }
+                    .id(track.id)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.96)),
+                        removal: .opacity
+                    ))
+                }
             }
-            .padding(.top, DS.Spacing.xl)
+            .animation(DS.Motion.standard, value: playback.currentTrack?.id)
 
-            AudioWave(active: playback.isPlaying && !playback.isBuffering)
+            AudioWave(active: playback.isPlaying && !playback.isBuffering,
+                      level: playback.audioLevel)
                 .frame(height: 68)
                 .padding(.horizontal, 4)
                 .padding(.top, DS.Spacing.l)
@@ -318,10 +352,16 @@ struct PlayerView: View {
 
 /// Horizontal flowing waveform: a few overlapping sine waves with different amplitude/wavelength/
 /// speed/opacity (the varying opacity gives the depth look). Drifts while playing, freezes on pause.
-/// Purely decorative — not driven by real audio levels.
+///
+/// If `level > 0` is supplied it overrides the synthetic "beat" envelope — the
+/// waves then ride the *real* audio RMS sampled by `AudioLevelTap`. Falls back
+/// to the synthetic beat when level isn't available (e.g. audio tap couldn't
+/// install — happens on HLS or right at song-start before the asset loads).
 struct AudioWave: View {
     var active: Bool
     var color: Color = .white
+    /// 0…1, smoothed RMS from `PlaybackEngine.audioLevel`. 0 means "use synthetic".
+    var level: Float = 0
 
     // (baseAmp fraction, wavelength, drift speed, pulse speed, pulse phase, max opacity, line width)
     private let waves: [(amp: CGFloat, wl: CGFloat, drift: Double, pulse: Double, pPhase: Double, opacity: Double, width: CGFloat)] = [
@@ -337,9 +377,17 @@ struct AudioWave: View {
                 let midY = size.height / 2
                 let W = size.width
                 for w in waves {
-                    // amplitude "beats": two summed sines with a wide swing → snappy, music-like rise/fall
-                    let beat = 0.5 + 0.38 * sin(t * w.pulse + w.pPhase) + 0.22 * sin(t * w.pulse * 1.9 + w.pPhase * 1.7)
-                    let pulse = max(0.08, beat)
+                    let pulse: Double
+                    if level > 0.02 {
+                        // Real-audio path: amplitude follows live RMS. Floor at
+                        // 0.15 so the wave doesn't completely collapse during
+                        // quiet passages.
+                        pulse = max(0.15, Double(level))
+                    } else {
+                        // Synthetic fallback: two summed sines with a wide swing → snappy, music-like rise/fall
+                        let beat = 0.5 + 0.38 * sin(t * w.pulse + w.pPhase) + 0.22 * sin(t * w.pulse * 1.9 + w.pPhase * 1.7)
+                        pulse = max(0.08, beat)
+                    }
                     // Clamp so the tallest peak always stays inside the view (no clipping). 0.92 leaves
                     // a little headroom for the line width on top of the half-height.
                     let amp = min(w.amp * CGFloat(pulse), 0.92) * size.height / 2

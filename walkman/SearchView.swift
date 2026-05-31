@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit  // UIPasteboard for the contextMenu "copy" action
 
 enum SearchScope: Hashable, Identifiable {
     case all
@@ -427,6 +428,14 @@ struct TrackRowSwipe: ViewModifier {
     @State private var showAdd = false
     @State private var showDownload = false
 
+    /// Plain "歌名 - 歌手" string used for both copy + share. Kept short so it works as a
+    /// chat snippet without overflowing one line.
+    private var shareText: String {
+        var s = track.name
+        if !track.singer.isEmpty { s += " - \(track.singer)" }
+        return s
+    }
+
     func body(content: Content) -> some View {
         content
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -436,6 +445,22 @@ struct TrackRowSwipe: ViewModifier {
                     .tint(.indigo)
                 if let onRemove {
                     Button(role: .destructive, action: onRemove) { Label("移除", systemImage: "trash") }
+                }
+            }
+            // contextMenu mirrors the swipe (so users who discover long-press get the
+            // same actions) and adds copy/share + the platform link. Heavier than swipe
+            // but doesn't conflict — both gestures coexist on List rows in SwiftUI.
+            .contextMenu {
+                Button { showAdd = true } label: { Label("收藏", systemImage: "heart") }
+                Button { showDownload = true } label: { Label("下载", systemImage: "arrow.down.circle") }
+                Divider()
+                Button {
+                    UIPasteboard.general.string = shareText
+                } label: { Label("复制歌曲信息", systemImage: "doc.on.doc") }
+                ShareLink(item: shareText) { Label("分享", systemImage: "square.and.arrow.up") }
+                if let onRemove {
+                    Divider()
+                    Button(role: .destructive, action: onRemove) { Label("从歌单移除", systemImage: "trash") }
                 }
             }
             .sheet(isPresented: $showAdd) {

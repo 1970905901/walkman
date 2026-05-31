@@ -41,6 +41,11 @@ final class PlaybackEngine: ObservableObject {
     }
 
     private var player: AVPlayer?
+    /// Real-time audio level (0…1, RMS-smoothed) tapped from AVPlayer output.
+    /// Drives `AudioWave`'s reactive amplitude. Published — views update live.
+    @Published private(set) var audioLevel: Float = 0
+    private var audioLevelTap: AudioLevelTap?
+    private var audioLevelObservation: AnyCancellable?
     /// libFLAC-backed player used when AVFoundation rejects a Hi-Res FLAC (-11828).
     private let hiResPlayer = HiResFLACPlayer()
     private var usingHiRes = false
@@ -290,6 +295,16 @@ final class PlaybackEngine: ObservableObject {
         let p = AVPlayer(playerItem: item)
         p.automaticallyWaitsToMinimizeStalling = true
         self.player = p
+
+        // Attach a real-time audio tap so AudioWave can react to actual volume.
+        // One AudioLevelTap per playback session; recreate on each new item so the
+        // smoothing state resets cleanly between songs.
+        let tap = AudioLevelTap()
+        self.audioLevelTap = tap
+        tap.install(on: item)
+        audioLevelObservation = tap.$level
+            .removeDuplicates()
+            .sink { [weak self] level in self?.audioLevel = level }
 
         // KVO: AVPlayerItem.status — fires when item loads / fails.
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
@@ -680,6 +695,19 @@ final class PlaybackEngine: ObservableObject {
             if !line.isEmpty { return line }
         }
         return currentTrack?.albumName
+    }
+
+    /// Current playing lyric line. Public so `LiveActivityController` can push
+    /// it through to the Live Activity / Dynamic Island as the song progresses.
+    /// Returns nil when there are no lyrics, the song is between lines, or the
+    /// line is empty (LRC "♪" placeholders are skipped).
+    func currentLyricLine() -> String? {
+        guard !currentLyrics.isEmpty,
+              let idx = LRCParser.activeIndex(at: currentTime + LyricSync.leadSeconds, in: currentLyrics) else {
+            return nil
+        }
+        let line = currentLyrics[idx].text.trimmingCharacters(in: .whitespaces)
+        return line.isEmpty ? nil : line
     }
 
     private func loadLyricsForNowPlaying() {

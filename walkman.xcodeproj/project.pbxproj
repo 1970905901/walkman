@@ -6,7 +6,20 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		9F21537F2FCC5A220063D17B /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9F21537E2FCC5A210063D17B /* WidgetKit.framework */; };
+		9F2153812FCC5A220063D17B /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9F2153802FCC5A220063D17B /* SwiftUI.framework */; };
+		9F2153922FCC5A240063D17B /* WalkmanWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 9F21537C2FCC5A210063D17B /* WalkmanWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		9F2153902FCC5A240063D17B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9F9F908D2FAB834600FC275C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9F21537B2FCC5A210063D17B;
+			remoteInfo = WalkmanWidgetExtension;
+		};
 		9F9F90AA2FAB834800FC275C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 9F9F908D2FAB834600FC275C /* Project object */;
@@ -23,27 +36,69 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		9F2153972FCC5A240063D17B /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				9F2153922FCC5A240063D17B /* WalkmanWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		9F21537C2FCC5A210063D17B /* WalkmanWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WalkmanWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		9F21537E2FCC5A210063D17B /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		9F2153802FCC5A220063D17B /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		9F21539E2FCC60D60063D17B /* WalkmanWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WalkmanWidgetExtension.entitlements; sourceTree = "<group>"; };
 		9F9F90952FAB834600FC275C /* walkman.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = walkman.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9F9F90A92FAB834800FC275C /* walkmanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = walkmanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9F9F90B32FAB834800FC275C /* walkmanUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = walkmanUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		9F9F90BB2FAB834800FC275C /* Exceptions for "walkman" folder in "walkman" target */ = {
+		9F2153962FCC5A240063D17B /* Exceptions for "WalkmanWidget" folder in "WalkmanWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+			);
+			target = 9F21537B2FCC5A210063D17B /* WalkmanWidgetExtension */;
+		};
+		9F21539D2FCC5BF10063D17B /* Exceptions for "WalkmanWidget" folder in "walkman" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				SharedAppGroup.swift,
+				SharedPlaybackState.swift,
+			);
+			target = 9F9F90942FAB834600FC275C /* walkman */;
+		};
+		9F9F90BB2FAB834800FC275C /* Exceptions for "walkman" folder in "walkman" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
 				Frameworks/libflac/src/deduplication/bitreader_read_rice_signed_block.c,
 				Frameworks/libflac/src/deduplication/lpc_compute_autocorrelation_intrin_neon.c,
 				Frameworks/libflac/src/deduplication/lpc_compute_autocorrelation_intrin_sse2.c,
 				Frameworks/libflac/src/deduplication/lpc_compute_autocorrelation_intrin.c,
+				Info.plist,
 			);
 			target = 9F9F90942FAB834600FC275C /* walkman */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		9F2153822FCC5A220063D17B /* WalkmanWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				9F21539D2FCC5BF10063D17B /* Exceptions for "WalkmanWidget" folder in "walkman" target */,
+				9F2153962FCC5A240063D17B /* Exceptions for "WalkmanWidget" folder in "WalkmanWidgetExtension" target */,
+			);
+			path = WalkmanWidget;
+			sourceTree = "<group>";
+		};
 		9F9F90972FAB834600FC275C /* walkman */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -65,6 +120,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		9F2153792FCC5A210063D17B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9F2153812FCC5A220063D17B /* SwiftUI.framework in Frameworks */,
+				9F21537F2FCC5A220063D17B /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9F9F90922FAB834600FC275C /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -89,12 +153,24 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		9F21537D2FCC5A210063D17B /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				9F21537E2FCC5A210063D17B /* WidgetKit.framework */,
+				9F2153802FCC5A220063D17B /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		9F9F908C2FAB834600FC275C = {
 			isa = PBXGroup;
 			children = (
+				9F21539E2FCC60D60063D17B /* WalkmanWidgetExtension.entitlements */,
 				9F9F90972FAB834600FC275C /* walkman */,
 				9F9F90AC2FAB834800FC275C /* walkmanTests */,
 				9F9F90B62FAB834800FC275C /* walkmanUITests */,
+				9F2153822FCC5A220063D17B /* WalkmanWidget */,
+				9F21537D2FCC5A210063D17B /* Frameworks */,
 				9F9F90962FAB834600FC275C /* Products */,
 			);
 			sourceTree = "<group>";
@@ -105,6 +181,7 @@
 				9F9F90952FAB834600FC275C /* walkman.app */,
 				9F9F90A92FAB834800FC275C /* walkmanTests.xctest */,
 				9F9F90B32FAB834800FC275C /* walkmanUITests.xctest */,
+				9F21537C2FCC5A210063D17B /* WalkmanWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -112,6 +189,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		9F21537B2FCC5A210063D17B /* WalkmanWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9F2153932FCC5A240063D17B /* Build configuration list for PBXNativeTarget "WalkmanWidgetExtension" */;
+			buildPhases = (
+				9F2153782FCC5A210063D17B /* Sources */,
+				9F2153792FCC5A210063D17B /* Frameworks */,
+				9F21537A2FCC5A210063D17B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				9F2153822FCC5A220063D17B /* WalkmanWidget */,
+			);
+			name = WalkmanWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = WalkmanWidgetExtension;
+			productReference = 9F21537C2FCC5A210063D17B /* WalkmanWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		9F9F90942FAB834600FC275C /* walkman */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 9F9F90BC2FAB834800FC275C /* Build configuration list for PBXNativeTarget "walkman" */;
@@ -119,10 +218,12 @@
 				9F9F90912FAB834600FC275C /* Sources */,
 				9F9F90922FAB834600FC275C /* Frameworks */,
 				9F9F90932FAB834600FC275C /* Resources */,
+				9F2153972FCC5A240063D17B /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				9F2153912FCC5A240063D17B /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				9F9F90972FAB834600FC275C /* walkman */,
@@ -190,6 +291,9 @@
 				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					9F21537B2FCC5A210063D17B = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
 					9F9F90942FAB834600FC275C = {
 						CreatedOnToolsVersion = 26.0.1;
 					};
@@ -221,11 +325,19 @@
 				9F9F90942FAB834600FC275C /* walkman */,
 				9F9F90A82FAB834800FC275C /* walkmanTests */,
 				9F9F90B22FAB834800FC275C /* walkmanUITests */,
+				9F21537B2FCC5A210063D17B /* WalkmanWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		9F21537A2FCC5A210063D17B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9F9F90932FAB834600FC275C /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -250,6 +362,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		9F2153782FCC5A210063D17B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9F9F90912FAB834600FC275C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -274,6 +393,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		9F2153912FCC5A240063D17B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9F21537B2FCC5A210063D17B /* WalkmanWidgetExtension */;
+			targetProxy = 9F2153902FCC5A240063D17B /* PBXContainerItemProxy */;
+		};
 		9F9F90AB2FAB834800FC275C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 9F9F90942FAB834600FC275C /* walkman */;
@@ -287,6 +411,68 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		9F2153942FCC5A240063D17B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = WalkmanWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G5PXDM7897;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WalkmanWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = WalkmanWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.heartbeat.walkman.WalkmanWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9F2153952FCC5A240063D17B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = WalkmanWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G5PXDM7897;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WalkmanWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = WalkmanWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.heartbeat.walkman.WalkmanWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		9F9F90BD2FAB834800FC275C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -294,7 +480,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = walkman/walkman.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = G5PXDM7897;
 				ENABLE_PREVIEWS = YES;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -313,7 +499,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.heartbeat.walkman;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -334,7 +520,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = walkman/walkman.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = G5PXDM7897;
 				ENABLE_PREVIEWS = YES;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -353,7 +539,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.heartbeat.walkman;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -577,6 +763,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		9F2153932FCC5A240063D17B /* Build configuration list for PBXNativeTarget "WalkmanWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9F2153942FCC5A240063D17B /* Debug */,
+				9F2153952FCC5A240063D17B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		9F9F90902FAB834600FC275C /* Build configuration list for PBXProject "walkman" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
