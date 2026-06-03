@@ -89,6 +89,11 @@ struct SettingsView: View {
                 LabeledContent("版本", value: appVersion)
             }
         }
+        // Let Form translucently overlay brandedSurface so settings doesn't
+        // feel like a separate iOS shell — keeps the gradient continuity.
+        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .brandedSurface()
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.large)
     }

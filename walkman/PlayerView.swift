@@ -282,7 +282,10 @@ struct PlayerView: View {
                 Text("-" + format(time: max(0, playback.duration - (isSeeking ? seekValue : playback.currentTime))))
             }
             .font(DS.Typo.numeric)
-            .foregroundColor(.white.opacity(0.72))
+            // Same beige family as the thumb/transport row, kept very low
+            // opacity so the time-readout sits in the background and the eye
+            // lands on the cover + play button first.
+            .foregroundStyle(DS.Palette.cassetteBody.opacity(0.36))
         }
         .padding(.bottom, DS.Spacing.l)
     }
@@ -291,36 +294,56 @@ struct PlayerView: View {
 
     /// Bottom control row. Cycle mode (left) is the combined shuffle/loop selector;
     /// list.bullet (right) opens the playback queue — both used to live in TopBar.
+    ///
+    /// Secondary buttons all use `cassetteBody.opacity(0.5)` so they share the warm
+    /// palette of the main play button + slider thumb but read as supporting cast
+    /// rather than competing for attention.
     private var controlSection: some View {
-        HStack {
+        let secondaryTint = DS.Palette.cassetteBody.opacity(0.5)
+        return HStack {
             Button {
                 cycleMode.advanced().apply(to: playback)
             } label: {
                 Image(systemName: cycleMode.icon)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(secondaryTint)
             }
             Spacer()
             Button { playback.previous() } label: {
                 Image(systemName: "backward.end.fill")
                     .font(.system(size: 28, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundStyle(secondaryTint)
             }
             Spacer()
             Button { playback.togglePlayPause() } label: {
                 ZStack {
-                    // White disc with a soft cover-color halo so the button feels
-                    // alive with the album art instead of floating in a vacuum.
-                    Circle().fill(Color.white)
+                    // Warm beige disc echoes the cassette body in the app icon —
+                    // pressing it feels like pressing a cassette key. Glyph is
+                    // the deep burgundy half of brand, not the gradient, so the
+                    // small triangle reads as a single solid color (gradient at
+                    // this size just smears into "dark blob").
+                    Circle().fill(DS.Palette.cassetteBody)
                         .frame(width: 76, height: 76)
                         .shadow(color: artwork.primary.opacity(0.55), radius: 22, y: 8)
                         .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
                     if playback.isBuffering {
-                        UIKitSpinner(style: .medium, color: .black)
+                        UIKitSpinner(style: .medium, color: UIColor(DS.Palette.brandStart))
                     } else {
+                        // Top→bottom burgundy → brass mini-gradient gives the
+                        // glyph a subtle "metal-warmed" feel, and 0.85 opacity
+                        // lets the beige disc bleed through a bit so the
+                        // triangle/pause bars don't punch as hard.
                         Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 30, weight: .bold))
-                            .foregroundStyle(DS.Palette.brandGradient)
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [
+                                        DS.Palette.brandStart.opacity(0.85),
+                                        DS.Palette.brandEnd.opacity(0.85)
+                                    ],
+                                    startPoint: .top, endPoint: .bottom
+                                )
+                            )
                             .offset(x: playback.isPlaying ? 0 : 2)
                     }
                 }
@@ -329,13 +352,13 @@ struct PlayerView: View {
             Button { playback.next() } label: {
                 Image(systemName: "forward.end.fill")
                     .font(.system(size: 28, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundStyle(secondaryTint)
             }
             Spacer()
             Button { showQueue = true } label: {
                 Image(systemName: "list.bullet")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(secondaryTint)
             }
         }
     }
@@ -454,9 +477,11 @@ struct ProgressSlider: View {
                 // Filled portion: brand gradient
                 Capsule().fill(DS.Palette.brandGradient)
                     .frame(width: thumbX, height: trackHeight)
-                // Thumb: white circle that grows on drag (Apple Music feel)
+                // Thumb: half-opacity cassette beige — same warm palette as the
+                // main play button, but soft enough to read as "secondary
+                // control" rather than competing for the eye.
                 Circle()
-                    .fill(.white)
+                    .fill(DS.Palette.cassetteBody.opacity(0.5))
                     .frame(width: thumbSize, height: thumbSize)
                     .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
                     .offset(x: thumbX - thumbSize / 2)

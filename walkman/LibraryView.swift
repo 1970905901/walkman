@@ -226,6 +226,7 @@ struct PlaylistDetailView: View {
     let playlistID: UUID
     @EnvironmentObject var playlists: PlaylistStore
     @EnvironmentObject var playback: PlaybackEngine
+    @StateObject private var artwork = ArtworkColors()
 
     private var playlist: PlaylistMeta? {
         playlists.playlists.first(where: { $0.id == playlistID })
@@ -239,58 +240,101 @@ struct PlaylistDetailView: View {
         if let p = playlist {
             List {
                 Section {
-                    HStack(spacing: 14) {
-                        CoverMosaicCompact(urls: tracks.prefix(4).map { $0.picURL })
-                            .frame(width: 110, height: 110)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(p.name).font(.title3.bold())
-                            Text("\(tracks.count) 首")
-                                .font(.subheadline).foregroundColor(.secondary)
-                            HStack(spacing: 8) {
-                                Button {
-                                    if let first = tracks.first {
-                                        playback.play(track: first, in: tracks, startIndex: 0)
-                                    }
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        Image(systemName: "play.fill")
-                                        Text("播放全部")
-                                    }
-                                    .font(.system(size: 13, weight: .semibold))
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .disabled(tracks.isEmpty)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, 6)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                    header(name: p.name)
+                        .padding(.horizontal, DS.Spacing.l)
+                        .padding(.vertical, DS.Spacing.m)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
                 }
                 Section {
-                    ForEach(tracks) { t in
-                        TrackRow(track: t)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                playback.play(track: t, in: tracks, startIndex: tracks.firstIndex { $0.id == t.id })
-                            }
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .trackRowSwipe(t, onRemove: { playlists.remove(trackIDs: [t.id], from: p.id) })
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { idx, t in
+                        HStack(alignment: .center, spacing: 4) {
+                            Text("\(idx + 1)")
+                                .font(DS.Typo.numeric)
+                                .foregroundStyle(DS.Palette.textTertiary)
+                                .frame(width: 28)
+                            TrackRow(track: t)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            playback.play(track: t, in: tracks, startIndex: idx)
+                        }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .trackRowSwipe(t, onRemove: { playlists.remove(trackIDs: [t.id], from: p.id) })
                     }
                 } header: {
-                    Text("曲目").font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
+                    Text("曲目")
+                        .font(DS.Typo.caption)
+                        .foregroundStyle(DS.Palette.textTertiary)
+                        .textCase(nil)
                 }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .background(Color(.systemGroupedBackground))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Background: dynamic gradient driven by the playlist's first cover.
+            // Same visual language as SonglistDetailView / BoardDetailView so
+            // "进了一个歌单详情" 看起来跨页面统一。
+            .background(
+                ZStack {
+                    DS.Palette.bgBase
+                    if !tracks.isEmpty {
+                        LinearGradient(
+                            colors: [artwork.primary.opacity(0.55), artwork.secondary.opacity(0.15), .clear],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .ignoresSafeArea(edges: .top)
+                        .transition(.opacity)
+                    }
+                }
+                .animation(DS.Motion.standard, value: tracks.isEmpty)
+            )
             .navigationTitle(p.name)
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                artwork.extract(from: tracks.first?.picURL)
+            }
+            .onChange(of: tracks.first?.id) { _, _ in
+                artwork.extract(from: tracks.first?.picURL)
+            }
         } else {
             ContentUnavailableView("歌单不存在", systemImage: "trash")
+        }
+    }
+
+    @ViewBuilder
+    private func header(name: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            CoverMosaicCompact(urls: tracks.prefix(4).map { $0.picURL })
+                .frame(width: 110, height: 110)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
+                .elevation(DS.Elevation.e2(artwork.primary))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(name)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(DS.Palette.textPrimary)
+                    .lineLimit(3)
+                Text("\(tracks.count) 首")
+                    .font(DS.Typo.numeric)
+                    .foregroundStyle(DS.Palette.textTertiary)
+                if !tracks.isEmpty {
+                    Button {
+                        playback.play(track: tracks[0], in: tracks, startIndex: 0)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "play.fill")
+                            Text("播放全部")
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 0)
         }
     }
 }

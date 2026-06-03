@@ -57,22 +57,46 @@ struct PlayHistoryView: View {
 
     var body: some View {
         List {
-            ForEach(Array(history.tracks.enumerated()), id: \.element.id) { idx, t in
-                TrackRow(track: t)
-                    .contentShape(Rectangle())
-                    .onTapGesture { playback.play(track: t, in: history.tracks, startIndex: idx) }
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) { history.remove(t.id) } label: {
-                            Label("移除", systemImage: "trash")
+            if !history.tracks.isEmpty {
+                // Section header: count + clear shortcut feel like a small toolbar
+                // attached to the list, rather than a stripe of secondary text.
+                Section {
+                    ForEach(Array(history.tracks.enumerated()), id: \.element.id) { idx, t in
+                        HStack(alignment: .center, spacing: 4) {
+                            Text("\(idx + 1)")
+                                .font(DS.Typo.numeric)
+                                .foregroundStyle(DS.Palette.textTertiary)
+                                .frame(width: 28)
+                            TrackRow(track: t)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { playback.play(track: t, in: history.tracks, startIndex: idx) }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) { history.remove(t.id) } label: {
+                                Label("移除", systemImage: "trash")
+                            }
                         }
                     }
+                } header: {
+                    HStack {
+                        Text("最近播放")
+                            .font(DS.Typo.caption)
+                            .foregroundStyle(DS.Palette.textTertiary)
+                        Spacer()
+                        Text("\(history.tracks.count) 首")
+                            .font(DS.Typo.numeric)
+                            .foregroundStyle(DS.Palette.textTertiary)
+                    }
+                    .textCase(nil)
+                }
             }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .brandedSurface()
         .navigationTitle("播放历史")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {

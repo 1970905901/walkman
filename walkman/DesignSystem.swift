@@ -33,10 +33,12 @@ enum DS {
     // Old tokens above are kept for back-compat; new code should prefer these.
 
     enum Palette {
-        // Brand — warm orange → red gradient. Single AccentColor in Assets covers
-        // system controls (Tab bar selection, Link, .borderedProminent, etc.).
-        static let brandStart = Color(red: 1.00, green: 0.48, blue: 0.27)   // #FF7A45
-        static let brandEnd   = Color(red: 1.00, green: 0.24, blue: 0.35)   // #FF3D5A
+        // Brand — burgundy → antique brass. Inspired by Tidal HiFi / B&O / 丰隐
+        // 圣谷 palettes. Reads as "成熟、有重量、不轻浮", which fits the multi-
+        // source HiFi positioning better than the original orange→red gradient
+        // (which felt energetic but a bit "小众活泼").
+        static let brandStart = Color(red: 0.545, green: 0.141, blue: 0.251)  // #8B2440 酒红
+        static let brandEnd   = Color(red: 0.757, green: 0.541, blue: 0.310)  // #C18A4F 古铜金
         static let brand      = Color.accentColor
         static let brandGradient = LinearGradient(
             colors: [brandStart, brandEnd],
@@ -54,6 +56,11 @@ enum DS {
         static let textPrimary   = Color("TextPrimary")
         static let textSecondary = Color("TextSecondary")
         static let textTertiary  = Color("TextTertiary")
+
+        /// Warm beige used on the cassette body in the app icon. Re-used as the
+        /// player's primary action button surface so the on-icon-press feeling
+        /// echoes the brand mark.
+        static let cassetteBody = Color(red: 0.910, green: 0.788, blue: 0.604)  // #E8C99A
     }
 
     /// Three-step glass material scale. Use base material as the body; layer a

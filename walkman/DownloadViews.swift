@@ -125,7 +125,8 @@ struct DownloadedView: View {
             }
             .padding(DS.Spacing.l)
         }
-        .background(Color(.systemGroupedBackground))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .brandedSurface()
         .navigationTitle("已下载")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
@@ -157,10 +158,15 @@ private struct DownloadFolderCard: View {
             CoverMosaic(urls: coverURLs)
                 .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous))
-                .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+                .elevation(DS.Elevation.e2())
             VStack(alignment: .leading, spacing: 2) {
-                Text(folder.name).font(.system(size: 14, weight: .semibold)).foregroundColor(.primary).lineLimit(1)
-                Text("\(count) 首").font(.caption2).foregroundColor(.secondary)
+                Text(folder.name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(DS.Palette.textPrimary)
+                    .lineLimit(1)
+                Text("\(count) 首")
+                    .font(DS.Typo.caption2)
+                    .foregroundStyle(DS.Palette.textTertiary)
             }
         }
     }
@@ -176,46 +182,51 @@ struct DownloadFolderView: View {
     var body: some View {
         let tracks = folder.map { downloads.tracks(in: $0) } ?? []
         List {
-            if !tracks.isEmpty {
+            if !tracks.isEmpty, let folder {
                 Section {
-                    Button {
-                        playback.play(track: tracks[0], in: tracks, startIndex: 0)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "play.fill")
-                            Text("播放全部")
-                        }
-                        .font(.system(size: 13, weight: .semibold))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                    header(folder: folder, tracks: tracks)
+                        .padding(.horizontal, DS.Spacing.l)
+                        .padding(.vertical, DS.Spacing.m)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
                 }
-            }
-            Section {
-                ForEach(Array(tracks.enumerated()), id: \.element.id) { idx, t in
-                    HStack(spacing: 4) {
-                        TrackRow(track: t)
-                        if let q = downloads.quality(for: t.id) {
-                            Text(q.displayName).font(.caption2).foregroundColor(.secondary)
+                Section {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { idx, t in
+                        HStack(alignment: .center, spacing: 4) {
+                            Text("\(idx + 1)")
+                                .font(DS.Typo.numeric)
+                                .foregroundStyle(DS.Palette.textTertiary)
+                                .frame(width: 28)
+                            TrackRow(track: t)
+                            if let q = downloads.quality(for: t.id) {
+                                Text(q.displayName)
+                                    .font(DS.Typo.caption2)
+                                    .foregroundStyle(DS.Palette.textTertiary)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { playback.play(track: t, in: tracks, startIndex: idx) }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) { downloads.removeDownload(trackID: t.id) } label: {
+                                Label("删除", systemImage: "trash")
+                            }
                         }
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture { playback.play(track: t, in: tracks, startIndex: idx) }
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) { downloads.removeDownload(trackID: t.id) } label: {
-                            Label("删除", systemImage: "trash")
-                        }
-                    }
+                } header: {
+                    Text("曲目")
+                        .font(DS.Typo.caption)
+                        .foregroundStyle(DS.Palette.textTertiary)
+                        .textCase(nil)
                 }
             }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .brandedSurface()
         .navigationTitle(folder?.name ?? "子歌单")
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
@@ -225,6 +236,38 @@ struct DownloadFolderView: View {
                              subtitle: "在播放器或歌曲菜单里下载到这个子歌单",
                              topPadding: 80)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func header(folder: DownloadFolder, tracks: [Track]) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            CoverMosaic(urls: Array(tracks.prefix(4).map { $0.picURL }))
+                .frame(width: 110, height: 110)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
+                .elevation(DS.Elevation.e2())
+            VStack(alignment: .leading, spacing: 6) {
+                Text(folder.name)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(DS.Palette.textPrimary)
+                    .lineLimit(2)
+                Text("\(tracks.count) 首 · 已下载")
+                    .font(DS.Typo.numeric)
+                    .foregroundStyle(DS.Palette.textTertiary)
+                Button {
+                    playback.play(track: tracks[0], in: tracks, startIndex: 0)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "play.fill")
+                        Text("播放全部")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
         }
     }
 }
@@ -245,41 +288,53 @@ struct DownloadsStatusView: View {
     var body: some View {
         List {
             if !active.isEmpty {
-                Section("下载中") {
+                Section {
                     ForEach(active, id: \.track.id) { rec in
                         statusRow(rec, trailing: AnyView(
                             ProgressView(value: downloads.progress[rec.track.id] ?? 0)
+                                .tint(DS.Palette.brandStart)
                                 .frame(width: 60)
                         ))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                     }
-                }
+                } header: { sectionHeader("下载中", count: active.count) }
             }
             if !failed.isEmpty {
-                Section("失败") {
+                Section {
                     ForEach(failed, id: \.track.id) { rec in
                         statusRow(rec, trailing: AnyView(
                             Button { downloads.retry(trackID: rec.track.id) } label: {
                                 Image(systemName: "arrow.clockwise.circle")
+                                    .foregroundStyle(DS.Palette.brandStart)
                             }.buttonStyle(.borderless)
                         ))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) { downloads.removeDownload(trackID: rec.track.id) } label: {
                                 Label("删除", systemImage: "trash")
                             }
                         }
                     }
-                }
+                } header: { sectionHeader("失败", count: failed.count) }
             }
             if !completed.isEmpty {
-                Section("已完成 (\(completed.count))") {
+                Section {
                     ForEach(completed, id: \.track.id) { rec in
                         statusRow(rec, trailing: AnyView(
-                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                         ))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                     }
-                }
+                } header: { sectionHeader("已完成", count: completed.count) }
             }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .brandedSurface()
         .navigationTitle("下载状态")
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
@@ -289,15 +344,41 @@ struct DownloadsStatusView: View {
         }
     }
 
+    private func sectionHeader(_ title: String, count: Int) -> some View {
+        HStack {
+            Text(title)
+                .font(DS.Typo.caption)
+                .foregroundStyle(DS.Palette.textTertiary)
+            Spacer()
+            Text("\(count)")
+                .font(DS.Typo.numeric)
+                .foregroundStyle(DS.Palette.textTertiary)
+        }
+        .textCase(nil)
+    }
+
     private func statusRow(_ rec: DownloadRecord, trailing: AnyView) -> some View {
         HStack(spacing: 12) {
             Artwork(url: rec.track.picURL, size: 40, radius: DS.Radius.small)
             VStack(alignment: .leading, spacing: 2) {
-                Text(rec.track.name).font(.system(size: 14, weight: .medium)).lineLimit(1)
+                Text(rec.track.name)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(DS.Palette.textPrimary)
+                    .lineLimit(1)
                 HStack(spacing: 5) {
-                    Text(rec.track.singer).font(.caption2).foregroundColor(.secondary).lineLimit(1)
-                    Text(rec.quality.displayName).font(.caption2).foregroundColor(.secondary)
-                    if let e = rec.errorMessage { Text(e).font(.caption2).foregroundColor(.orange).lineLimit(1) }
+                    Text(rec.track.singer)
+                        .font(DS.Typo.caption2)
+                        .foregroundStyle(DS.Palette.textTertiary)
+                        .lineLimit(1)
+                    Text(rec.quality.displayName)
+                        .font(DS.Typo.caption2)
+                        .foregroundStyle(DS.Palette.textTertiary)
+                    if let e = rec.errorMessage {
+                        Text(e)
+                            .font(DS.Typo.caption2)
+                            .foregroundColor(.orange)
+                            .lineLimit(1)
+                    }
                 }
             }
             Spacer(minLength: 8)

@@ -96,7 +96,11 @@ private struct NowPlayingWidgetView: View {
             // Big cover stacks above title; uses available data preferentially.
             if let np = entry.nowPlaying {
                 cover(title: np.title, path: np.coverLocalPath, size: 72)
-                titleArtist(title: np.title, artist: np.artist)
+                // Title always shown; second line is the live lyric when
+                // available (Apple Music-style), otherwise the artist.
+                titleSecondary(title: np.title,
+                               secondary: np.currentLyric ?? np.artist,
+                               isLyric: np.currentLyric != nil)
                 Spacer(minLength: 0)
                 Button(intent: PlayPauseIntent()) {
                     Image(systemName: np.isPlaying ? "pause.fill" : "play.fill")
@@ -141,6 +145,15 @@ private struct NowPlayingWidgetView: View {
                     .foregroundStyle(brandGradient)
                 if let np = entry.nowPlaying {
                     titleArtist(title: np.title, artist: np.artist, titleSize: 14)
+                    if let lyric = np.currentLyric, !lyric.isEmpty {
+                        // Live lyric line under the artist when the song has lyrics.
+                        // Brand gradient + medium weight so it reads as "what's
+                        // playing right now" rather than just another caption.
+                        Text(lyric)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(brandGradient)
+                            .lineLimit(1)
+                    }
                     progressBar(elapsed: np.projectedElapsed(), duration: np.duration)
                         .padding(.top, 2)
                     transportRow(isPlaying: np.isPlaying)
@@ -168,7 +181,8 @@ private struct NowPlayingWidgetView: View {
     private var accessoryRect: some View {
         let np = entry.nowPlaying
         let label = np?.title ?? entry.mostRecent?.title ?? "暂无播放"
-        let sub = np?.artist ?? entry.mostRecent?.artist ?? "打开 walkman 听歌"
+        // Prefer live lyric, fall back to artist
+        let sub = np?.currentLyric ?? np?.artist ?? entry.mostRecent?.artist ?? "打开 walkman 听歌"
         return HStack(spacing: 6) {
             Image(systemName: np?.isPlaying == true ? "waveform" : "music.note")
                 .font(.system(size: 14, weight: .bold))
@@ -208,6 +222,29 @@ private struct NowPlayingWidgetView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1)
+        }
+    }
+
+    /// Title + a single configurable second line. When the second line is a
+    /// lyric, render it with the brand gradient so it's distinguishable from
+    /// "artist" at a glance.
+    private func titleSecondary(title: String, secondary: String, isLyric: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            if isLyric {
+                Text(secondary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(brandGradient)
+                    .lineLimit(1)
+            } else {
+                Text(secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+            }
         }
     }
 
@@ -298,6 +335,7 @@ private struct NowPlayingWidgetView: View {
     NowPlayingEntry(date: .now,
         nowPlaying: SharedNowPlaying(trackID: "kw_xx", title: "黄昏", artist: "周传雄",
             coverLocalPath: nil, isPlaying: true, elapsed: 80, duration: 343,
+            currentLyric: "过完整个夏天 忧伤并没有好一些",
             updatedAt: .now),
         mostRecent: nil)
 }
@@ -308,6 +346,7 @@ private struct NowPlayingWidgetView: View {
     NowPlayingEntry(date: .now,
         nowPlaying: SharedNowPlaying(trackID: "kw_xx", title: "黄昏", artist: "周传雄",
             coverLocalPath: nil, isPlaying: true, elapsed: 80, duration: 343,
+            currentLyric: "过完整个夏天 忧伤并没有好一些",
             updatedAt: .now),
         mostRecent: nil)
 }
