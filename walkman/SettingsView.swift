@@ -14,6 +14,11 @@ struct SettingsView: View {
                     }
                 }
                 Toggle("车机/锁屏用专辑栏显示歌词", isOn: $settings.showLyricsOnNowPlaying)
+                NavigationLink {
+                    EQView()
+                } label: {
+                    Label("均衡器", systemImage: "slider.vertical.3")
+                }
             } header: {
                 Text("播放")
             } footer: {

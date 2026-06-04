@@ -44,6 +44,16 @@ struct LibraryView: View {
                 }
                 .padding(.horizontal, DS.Spacing.l)
 
+                // Full-width "听歌报告" entry — drawn from the same event stream
+                // as PlayHistory but visualizes it.
+                NavigationLink {
+                    StatsView()
+                } label: {
+                    StatsShortcutCard(playCount: history.events.count)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, DS.Spacing.l)
+
                 Section {
                     LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(playlists.playlists) { p in
@@ -86,10 +96,18 @@ struct LibraryView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { showCreate = true } label: { Image(systemName: "plus.circle.fill") }
+                Button { showCreate = true } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(DS.Palette.brandGradient)
+                }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
+                NavigationLink { SettingsView() } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(DS.Palette.brandGradient)
+                }
             }
         }
         .alert("新建歌单", isPresented: $showCreate) {
@@ -115,6 +133,40 @@ struct LibraryView: View {
 }
 
 /// Half-width entry card used for the 已下载 / 播放历史 shortcuts at the top of 我的.
+/// Wide hero card linking to StatsView. Brand-gradient background + "view
+/// report" affordance so it reads as a separate destination from the two
+/// neighbor cards above.
+private struct StatsShortcutCard: View {
+    let playCount: Int
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("听歌报告")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text(playCount > 0 ? "已记录 \(playCount) 次播放" : "听几首歌看看你的口味")
+                    .font(DS.Typo.caption)
+                    .foregroundStyle(.white.opacity(0.78))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .padding(DS.Spacing.m)
+        .frame(maxWidth: .infinity)
+        .background(DS.Palette.brandGradient,
+                    in: RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
+        .elevation(DS.Elevation.e1(DS.Palette.brandStart))
+    }
+}
+
 private struct LibraryShortcutCard: View {
     let icon: String
     let title: String

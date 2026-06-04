@@ -123,6 +123,18 @@ extension View {
         shadow(color: spec.color, radius: spec.radius, x: 0, y: spec.y)
     }
 
+    /// Restores the brand appearance(color-scheme + accent tint) on a sheet
+    /// that was opened from a parent forcing `.preferredColorScheme(...)`
+    /// (i.e. PlayerView). Both default to inherited, but a forced scheme on the
+    /// sheet re-roots its environment and resets `.tint`, so we have to put both
+    /// back deliberately.
+    func inheritedAppearance() -> some View {
+        let scheme: ColorScheme = UIScreen.main.traitCollection.userInterfaceStyle == .dark ? .dark : .light
+        return self
+            .preferredColorScheme(scheme)
+            .tint(Color("AccentColor"))
+    }
+
     /// Top-level tab surface: a brand gradient wash on top of the base. Dark mode
     /// uses heavier opacity so the wash actually reads on a deep background;
     /// light mode is half-strength so it stays Apple-Music-restrained rather than

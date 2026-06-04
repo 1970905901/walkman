@@ -12,6 +12,7 @@ struct walkmanApp: App {
     @StateObject private var history = PlayHistoryStore()
     @StateObject private var sleepTimer = SleepTimer()
     @StateObject private var recents = RecentTracksRecorder()
+    @StateObject private var eq = EQStore()
     /// Bridges Darwin notifications from the widget's transport-button intents
     /// back into PlaybackEngine. Init-once, no UI state.
     private let commandBridge = CommandBridge()
@@ -44,7 +45,12 @@ struct walkmanApp: App {
         WindowGroup {
             ZStack {
                 RootTabView()
-                    .tint(DS.Palette.brandStart)   // iOS 26 SwiftUI no longer auto-pulls AccentColor for every control; set it explicitly at the root.
+                    // Use the AccentColor asset (light + dark variants) instead of the
+                    // raw `brandStart` constant — the latter is locked to the light
+                    // shade and renders too dark on a black backdrop. iOS 26 still
+                    // needs `.tint(...)` explicitly because the system no longer
+                    // auto-pulls AccentColor for every control.
+                    .tint(Color("AccentColor"))
                     .environmentObject(playback)
                     .environmentObject(sources)
                     .environmentObject(playlists)
@@ -53,6 +59,7 @@ struct walkmanApp: App {
                     .environmentObject(downloads)
                     .environmentObject(history)
                     .environmentObject(sleepTimer)
+                    .environmentObject(eq)
 
                 if showSplash {
                     SplashView()
@@ -64,6 +71,7 @@ struct walkmanApp: App {
                 sleepTimer.bind(to: playback)
                 recents.bind(to: playback)
                 commandBridge.start(playback: playback, sources: sources)
+                playback.bindEQ(eq)
                 await bootstrap()
                 // Splash lives for ~900ms — long enough for the spring reveal,
                 // short enough not to feel like a wait.

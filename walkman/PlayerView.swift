@@ -16,7 +16,13 @@ struct PlayerView: View {
     @State private var loadingLyrics = false
     @State private var trackToFavorite: Track?
     @State private var trackToDownload: Track?
+    @State private var showEQ = false
+    /// Vertical drag-down to dismiss.
     @State private var dragOffset: CGFloat = 0
+    /// Horizontal left-edge swipe-back. Tracked separately from `dragOffset`
+    /// so the two gestures can be active simultaneously without arithmetic
+    /// conflicts.
+    @State private var swipeBackOffset: CGFloat = 0
 
     /// Shared selector — see `PlaybackCycleMode` in PlaybackEngine.swift.
     private var cycleMode: PlaybackCycleMode {
@@ -45,7 +51,9 @@ struct PlayerView: View {
             .padding(.horizontal, DS.Spacing.l)
         }
         .preferredColorScheme(.dark)
-        .offset(y: dragOffset)
+        // Stack the two dismissal offsets — vertical for swipe-down, horizontal
+        // for left-edge swipe-back. Either one closes the player.
+        .offset(x: swipeBackOffset, y: dragOffset)
         // Custom drag-to-dismiss. fullScreenCover doesn't have sheet's built-in swipe-down,
         // so we re-implement it: track downward drags from the top ~180pt strip (now wider
         // since the chrome — chevron/menu buttons — is gone), dismiss if >120pt or fast
@@ -65,26 +73,63 @@ struct PlayerView: View {
                     }
                 }
         )
+        // Left-edge swipe-back, matching iOS NavigationStack convention. We
+        // activate only when the drag started within 24pt of the left edge and
+        // is moving more horizontally than vertically — otherwise the cover-
+        // page TabView's own horizontal swipe (cover ↔ lyrics) would conflict.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onChanged { v in
+                    let startedAtEdge = v.startLocation.x < 24
+                    let mostlyHorizontal = abs(v.translation.width) > abs(v.translation.height)
+                    if (startedAtEdge && mostlyHorizontal) || swipeBackOffset > 0 {
+                        swipeBackOffset = max(0, v.translation.width)
+                    }
+                }
+                .onEnded { v in
+                    if swipeBackOffset > 100 || v.predictedEndTranslation.width > 200 {
+                        dismiss()
+                    } else {
+                        withAnimation(DS.Motion.standard) { swipeBackOffset = 0 }
+                    }
+                }
+        )
         .onAppear {
             sync()
         }
         .onChange(of: playback.currentTrack?.id) { _, _ in sync() }
+        // All sheets below are forced back to the system's real color scheme +
+        // re-injected with the brand tint. Both default-inherit through SwiftUI
+        // ancestors, but `.preferredColorScheme` re-roots the sheet so we lose
+        // the `.tint(Color("AccentColor"))` set by walkmanApp — without
+        // putting it back, Toggle/Picker/system controls fall back to iOS green.
         .sheet(isPresented: $showQueue) {
             QueueView()
+                .inheritedAppearance()
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $trackToFavorite) { track in
             AddToPlaylistSheet(track: track)
+                .inheritedAppearance()
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $trackToDownload) { track in
             DownloadSheet(track: track)
+                .inheritedAppearance()
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showSleepSheet) {
             SleepTimerSheet()
+                .inheritedAppearance()
                 .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showEQ) {
+            // EQView uses navigationTitle, so wrap in its own NavigationStack —
+            // PlayerView's fullScreenCover doesn't provide one.
+            NavigationStack { EQView() }
+                .inheritedAppearance()
                 .presentationDragIndicator(.visible)
         }
     }
@@ -148,6 +193,9 @@ struct PlayerView: View {
                         Label("下载", systemImage: "arrow.down.circle")
                     }
                     Divider()
+                    Button { showEQ = true } label: {
+                        Label("均衡器", systemImage: "slider.vertical.3")
+                    }
                     Button { showSleepSheet = true } label: {
                         // Active timer shows its label so the user can see what's armed at a glance.
                         switch sleepTimer.mode {

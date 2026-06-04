@@ -41,11 +41,18 @@ final class PlaybackEngine: ObservableObject {
     }
 
     private var player: AVPlayer?
-    /// Real-time audio level (0…1, RMS-smoothed) tapped from AVPlayer output.
-    /// Drives `AudioWave`'s reactive amplitude. Published — views update live.
+    /// Real-time audio level (0…1, RMS-smoothed) — sourced from the same
+    /// MTAudioProcessingTap that runs the equalizer. Drives AudioWave's
+    /// reactive amplitude. Published so views update live.
     @Published private(set) var audioLevel: Float = 0
-    private var audioLevelTap: AudioLevelTap?
+    /// Single tap doing both EQ + RMS. Recreated each startPlayback so biquad
+    /// state lines resets between songs.
+    private var audioTap: EQAudioTap?
     private var audioLevelObservation: AnyCancellable?
+    /// Optional EQ binding — PlaybackEngine doesn't own EQStore, walkmanApp
+    /// injects one on launch via `bindEQ(_:)` so settings + DSP stay in sync.
+    private weak var eqStore: EQStore?
+    private var eqObservation: AnyCancellable?
     /// libFLAC-backed player used when AVFoundation rejects a Hi-Res FLAC (-11828).
     private let hiResPlayer = HiResFLACPlayer()
     private var usingHiRes = false
@@ -106,6 +113,19 @@ final class PlaybackEngine: ObservableObject {
 
     func setLyricsResolver(_ resolver: @escaping (Track) async -> [LyricLine]) {
         self.lyricsResolver = resolver
+    }
+
+    /// Wire up the equalizer. Called once on launch by walkmanApp.
+    /// Every change to EQStore.settings.gains pushes new coefficients into the
+    /// live tap without restarting the player — slider drags are real-time.
+    func bindEQ(_ store: EQStore) {
+        self.eqStore = store
+        eqObservation = store.$settings
+            .removeDuplicates()
+            .sink { [weak self] s in
+                self?.audioTap?.setEnabled(s.enabled)
+                self?.audioTap?.setGains(s.gains)
+            }
     }
 
     private func configureAudioSession() {
@@ -296,11 +316,16 @@ final class PlaybackEngine: ObservableObject {
         p.automaticallyWaitsToMinimizeStalling = true
         self.player = p
 
-        // Attach a real-time audio tap so AudioWave can react to actual volume.
-        // One AudioLevelTap per playback session; recreate on each new item so the
-        // smoothing state resets cleanly between songs.
-        let tap = AudioLevelTap()
-        self.audioLevelTap = tap
+        // One MTAudioProcessingTap per playback session — handles both EQ
+        // (when toggled on) and RMS for AudioWave. AVMutableAudioMixInputParameters
+        // can only carry one audioTapProcessor, so combining the two roles is
+        // not a nicety, it's a hard requirement.
+        let tap = EQAudioTap()
+        self.audioTap = tap
+        if let s = eqStore?.settings {
+            tap.setGains(s.gains)
+            tap.setEnabled(s.enabled)
+        }
         tap.install(on: item)
         audioLevelObservation = tap.$level
             .removeDuplicates()
