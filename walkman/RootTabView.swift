@@ -37,54 +37,146 @@ struct ErrorBanner: View {
     }
 }
 
+/// Identifies the four iPhone tabs. `WalkmanSection.title` is the short Chinese
+/// label used in the tab bar. iPad/Mac do NOT use this — they have their own
+/// navigation models under `walkman/iPad/` and `walkman/Mac/`.
+enum WalkmanSection: String, Hashable, CaseIterable, Identifiable {
+    case search, leaderboard, songlist, library
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .search:      return "搜索"
+        case .leaderboard: return "排行榜"
+        case .songlist:    return "歌单"
+        case .library:     return "我的"
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .search:      return "magnifyingglass"
+        case .leaderboard: return "chart.bar.fill"
+        case .songlist:    return "rectangle.stack.fill"
+        case .library:     return "music.note.list"
+        }
+    }
+    /// Legacy integer tag — keeps `@AppStorage("ui.activeTab")` portable.
+    var tag: Int {
+        switch self {
+        case .search: 0; case .leaderboard: 1; case .songlist: 2; case .library: 3
+        }
+    }
+    static func from(tag: Int) -> WalkmanSection {
+        WalkmanSection.allCases.first(where: { $0.tag == tag }) ?? .search
+    }
+}
+
+/// Root view. Dispatches between three completely independent layouts:
+///
+/// - **iPhone (compact size class)** → `phoneTabs` (existing TabView UI)
+/// - **iPad (regular size class, not Catalyst)** → `IPadRootView` (under `walkman/iPad/`)
+/// - **Mac Catalyst** → `MacRootView` (under `walkman/Mac/`)
+///
+/// Per user request these three layouts are NOT trying to share view bodies via
+/// sizeClass branches inside SearchView/LibraryView/etc. Each platform owns its
+/// own visual language. Shared layer = models, stores, playback, design tokens,
+/// resolvers — anything that isn't a screen.
 struct RootTabView: View {
     @EnvironmentObject var playback: PlaybackEngine
     @EnvironmentObject var settings: SettingsStore
+    @Environment(\.horizontalSizeClass) private var hSize
     @State private var showPlayer = false
     @State private var leaderboardPath = NavigationPath()
     @State private var songlistPath = NavigationPath()
     @State private var libraryPath = NavigationPath()
+    @State private var searchPath = NavigationPath()
     @AppStorage("ui.activeTab") private var activeTab: Int = 0
+
+    /// True when the binary is running under Mac Catalyst. Detected at runtime
+    /// rather than `#if targetEnvironment(macCatalyst)` so a single build can
+    /// branch correctly at the view layer.
+    private var isCatalyst: Bool {
+        ProcessInfo.processInfo.isMacCatalystApp
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: $activeTab) {
-                NavigationStack { SearchView() }
-                    .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                    .tag(0)
-                NavigationStack(path: $leaderboardPath) { LeaderboardView() }
-                    .tabItem { Label("排行榜", systemImage: "chart.bar.fill") }
-                    .tag(1)
-                NavigationStack(path: $songlistPath) { SonglistView() }
-                    .tabItem { Label("歌单", systemImage: "rectangle.stack.fill") }
-                    .tag(2)
-                NavigationStack(path: $libraryPath) { LibraryView() }
-                    .tabItem { Label("我的", systemImage: "music.note.list") }
-                    .tag(3)
+            if isCatalyst {
+                MacRootView(onOpenPlayer: openPlayer)
+            } else if hSize == .compact {
+                phoneTabs
+            } else {
+                IPadRootView(onOpenPlayer: openPlayer)
             }
-            if playback.currentTrack != nil {
-                MiniPlayer(onTap: { showPlayer = true })
-                    .padding(.bottom, 50)
-                    .transition(.move(edge: .bottom))
-            }
-            if let err = playback.lastError {
-                ErrorBanner(text: err, tone: .warning) { playback.lastError = nil }
-                    .padding(.bottom, playback.currentTrack != nil ? 110 : 60)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            } else if let notice = playback.cascadeNotice, settings.showDebugNotices {
-                ErrorBanner(text: notice, tone: .info) { playback.cascadeNotice = nil }
-                    .padding(.bottom, playback.currentTrack != nil ? 110 : 60)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
+            overlays
         }
-        .animation(.spring(duration: 0.3), value: playback.lastError)
-        .animation(.spring(duration: 0.3), value: playback.cascadeNotice)
-        .animation(.spring(duration: 0.3), value: playback.currentTrack?.id)
-        // fullScreenCover (vs .sheet) gives us a true edge-to-edge dark player. The
-        // built-in slide-up plus our own drag-to-dismiss inside PlayerView covers the
-        // "Hero" feel without the layout-rewriting cost of matchedGeometryEffect.
-        .fullScreenCover(isPresented: $showPlayer) {
-            PlayerView()
+    }
+
+    /// Show the full PlayerView with the standard spring animation. Passed to
+    /// IPadRootView's bottom bar so tapping the cover/title in the QQ-style
+    /// bar opens the same modal player the iPhone MiniPlayer opens.
+    private func openPlayer() {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+            showPlayer = true
+        }
+    }
+
+    // MARK: - iPhone (compact)
+
+    private var phoneTabs: some View {
+        TabView(selection: $activeTab) {
+            NavigationStack(path: $searchPath) { SearchView() }
+                .tabItem { Label(WalkmanSection.search.title, systemImage: WalkmanSection.search.systemImage) }
+                .tag(WalkmanSection.search.tag)
+            NavigationStack(path: $leaderboardPath) { LeaderboardView() }
+                .tabItem { Label(WalkmanSection.leaderboard.title, systemImage: WalkmanSection.leaderboard.systemImage) }
+                .tag(WalkmanSection.leaderboard.tag)
+            NavigationStack(path: $songlistPath) { SonglistView() }
+                .tabItem { Label(WalkmanSection.songlist.title, systemImage: WalkmanSection.songlist.systemImage) }
+                .tag(WalkmanSection.songlist.tag)
+            NavigationStack(path: $libraryPath) { LibraryView() }
+                .tabItem { Label(WalkmanSection.library.title, systemImage: WalkmanSection.library.systemImage) }
+                .tag(WalkmanSection.library.tag)
+        }
+    }
+
+    // MARK: - Overlays (mini player, error banner, full player)
+
+    @ViewBuilder
+    private var overlays: some View {
+        // iPhone-only floating MiniPlayer. iPad/Mac use a full-width bottom
+        // bar (IPadBottomBar) rendered inside IPadRootView, so a floating
+        // overlay here would just stack on top of it and look duplicated.
+        if playback.currentTrack != nil, hSize == .compact, !isCatalyst {
+            MiniPlayer(onTap: openPlayer)
+                .padding(.bottom, 50)
+                .transition(.move(edge: .bottom))
+                .opacity(showPlayer ? 0 : 1)
+                .animation(.spring(duration: 0.3), value: playback.currentTrack?.id)
+        }
+        if let err = playback.lastError {
+            ErrorBanner(text: err, tone: .warning) { playback.lastError = nil }
+                .padding(.bottom, playback.currentTrack != nil ? 110 : 60)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(duration: 0.3), value: playback.lastError)
+        } else if let notice = playback.cascadeNotice, settings.showDebugNotices {
+            ErrorBanner(text: notice, tone: .info) { playback.cascadeNotice = nil }
+                .padding(.bottom, playback.currentTrack != nil ? 110 : 60)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(duration: 0.3), value: playback.cascadeNotice)
+        }
+
+        // PlayerView overlay only fires for iPhone (compact). iPad/Mac own
+        // their player as a content-area swap inside IPadRootView so the
+        // persistent IPadBottomBar stays visible like QQ 音乐 桌面端.
+        if showPlayer, hSize == .compact, !isCatalyst {
+            PlayerView(onClose: {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+                    showPlayer = false
+                }
+            })
+            .transition(.move(edge: .bottom))
+            .zIndex(10)
         }
     }
 }

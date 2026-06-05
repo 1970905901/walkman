@@ -497,8 +497,16 @@ struct PlayerBackdrop: View {
     let secondary: Color
     var body: some View {
         ZStack {
+            // Opaque base — guarantees the backdrop never lets the underlying
+            // tab view bleed through, no matter how transparent the cover-
+            // color gradient ends up after extraction.
+            Color.black
             LinearGradient(
-                colors: [primary, secondary, Color.black.opacity(0.85)],
+                // All three stops are fully opaque now. The previous bottom
+                // stop was `black @ 0.85` which, with the cover colors being
+                // light tones (e.g. pale country-album beige), produced a
+                // ~13% transparent floor that showed the home screen behind.
+                colors: [primary, secondary, Color.black],
                 startPoint: .top, endPoint: .bottom
             )
             // Soft noise / depth

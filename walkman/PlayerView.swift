@@ -5,7 +5,11 @@ struct PlayerView: View {
     @EnvironmentObject var sources: SourceManager
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var sleepTimer: SleepTimer
-    @Environment(\.dismiss) var dismiss
+    @Environment(\.horizontalSizeClass) private var hSize
+    /// Called when the user dismisses the player via the chevron, drag-down, or
+    /// left-edge swipe-back. Set by RootTabView's ZStack — we're no longer a
+    /// modal, so `@Environment(\.dismiss)` doesn't apply.
+    let onClose: () -> Void
     @StateObject private var artwork = ArtworkColors()
     @State private var showSleepSheet = false
     @State private var seekValue: Double = 0
@@ -17,6 +21,12 @@ struct PlayerView: View {
     @State private var trackToFavorite: Track?
     @State private var trackToDownload: Track?
     @State private var showEQ = false
+    /// MV (music video) sheet state. nil = closed, set = open with that info.
+    @State private var mvInfo: MusicVideoInfo?
+    /// Inflight indicator while we hit the per-source MV endpoint.
+    @State private var loadingMv = false
+    /// Toast-like message shown briefly after MV resolution fails / starts.
+    @State private var mvNotice: String?
     /// Vertical drag-down to dismiss.
     @State private var dragOffset: CGFloat = 0
     /// Horizontal left-edge swipe-back. Tracked separately from `dragOffset`
@@ -30,8 +40,26 @@ struct PlayerView: View {
     }
 
     var body: some View {
+        // iPad / Mac get a dual-pane layout — cover/controls on the left,
+        // lyrics on the right. Their state is isolated (lives on IPadPlayerView)
+        // so we don't have to share any of this view's @State across sizeClass
+        // changes. The iPhone (compact) implementation continues below.
+        if hSize != .compact {
+            return AnyView(IPadPlayerView(onClose: onClose))
+        }
+        return AnyView(compactBody)
+    }
+
+    private var compactBody: some View {
         ZStack {
+            // Backdrop fills the entire ZStack — `.ignoresSafeArea` here
+            // (rather than on PlayerView in RootTabView) makes sure the
+            // gradient extends behind status bar + home indicator, not just
+            // to safe-area bounds. Without this the bottom of the screen
+            // showed the underlying TabBar peeking through during transitions.
             PlayerBackdrop(primary: artwork.primary, secondary: artwork.secondary)
+                .ignoresSafeArea()
+
             VStack(spacing: 0) {
                 topBar
                 TabView(selection: $page) {
@@ -49,7 +77,16 @@ struct PlayerView: View {
                     .padding(.bottom, 28)
             }
             .padding(.horizontal, DS.Spacing.l)
+            // Cap the working width on iPad / large iPhones — the backdrop
+            // still spans edge to edge for that "we own the screen" feel, but
+            // controls stay reachable instead of stretching across a tablet.
+            .frame(maxWidth: 520)
         }
+        // Force the player to claim the full screen. Without an explicit fill,
+        // ZStack sized itself to the intrinsic content height — making the
+        // backdrop short AND triggering SwiftUI to recalculate layout mid-
+        // transition, which manifested as the cover "jittering" during slide-up.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .preferredColorScheme(.dark)
         // Stack the two dismissal offsets — vertical for swipe-down, horizontal
         // for left-edge swipe-back. Either one closes the player.
@@ -67,7 +104,7 @@ struct PlayerView: View {
                 }
                 .onEnded { v in
                     if dragOffset > 120 || v.predictedEndTranslation.height > 250 {
-                        dismiss()
+                        onClose()
                     } else {
                         withAnimation(DS.Motion.standard) { dragOffset = 0 }
                     }
@@ -88,7 +125,7 @@ struct PlayerView: View {
                 }
                 .onEnded { v in
                     if swipeBackOffset > 100 || v.predictedEndTranslation.width > 200 {
-                        dismiss()
+                        onClose()
                     } else {
                         withAnimation(DS.Motion.standard) { swipeBackOffset = 0 }
                     }
@@ -131,6 +168,58 @@ struct PlayerView: View {
             NavigationStack { EQView() }
                 .inheritedAppearance()
                 .presentationDragIndicator(.visible)
+        }
+        // MV uses fullScreenCover (not sheet) — video benefits from edge-to-edge,
+        // and the user explicitly opted into "watch a video", not a peek.
+        .fullScreenCover(item: $mvInfo) { info in
+            if let track = playback.currentTrack {
+                MvPlayerView(info: info, track: track, onClose: { mvInfo = nil })
+            }
+        }
+        .overlay(alignment: .top) {
+            if let mvNotice {
+                Text(mvNotice)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5))
+                    .padding(.top, 60)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.3), value: mvNotice)
+    }
+
+    /// Triggered from the ⋯ menu's "播放 MV" item. Hits the per-source MV
+    /// endpoint; on success opens MvPlayerView, otherwise flashes a toast.
+    private func fetchMv() {
+        guard let track = playback.currentTrack else { return }
+        loadingMv = true
+        showFlash("正在获取 MV…")
+        Task {
+            let info = await MvResolver.getMvUrl(for: track)
+            await MainActor.run {
+                loadingMv = false
+                if let info, info.bestUrl() != nil {
+                    mvNotice = nil
+                    mvInfo = info
+                } else {
+                    showFlash("暂无可用 MV")
+                }
+            }
+        }
+    }
+
+    /// Show a transient banner that auto-clears after 1.8 s. Replaces any active
+    /// banner so taps in rapid succession don't queue up.
+    private func showFlash(_ text: String) {
+        mvNotice = text
+        Task {
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            await MainActor.run {
+                if mvNotice == text { mvNotice = nil }
+            }
         }
     }
 
@@ -196,6 +285,14 @@ struct PlayerView: View {
                     Button { showEQ = true } label: {
                         Label("均衡器", systemImage: "slider.vertical.3")
                     }
+                    Button { fetchMv() } label: {
+                        if loadingMv {
+                            Label("正在获取 MV…", systemImage: "play.rectangle")
+                        } else {
+                            Label("播放 MV", systemImage: "play.rectangle")
+                        }
+                    }
+                    .disabled(loadingMv || playback.currentTrack == nil)
                     Button { showSleepSheet = true } label: {
                         // Active timer shows its label so the user can see what's armed at a glance.
                         switch sleepTimer.mode {

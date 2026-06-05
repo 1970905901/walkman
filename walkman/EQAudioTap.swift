@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AVFoundation
+import CoreAudio       // UnsafeMutableAudioBufferListPointer — not transitive on Mac Catalyst
 import MediaToolbox
 import Accelerate
 import os.lock

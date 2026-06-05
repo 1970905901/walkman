@@ -103,7 +103,7 @@ struct DownloadedView: View {
     @State private var showNewFolder = false
     @State private var newFolderName = ""
 
-    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+    private let columns = [GridItem(.adaptive(minimum: 170), spacing: 14)]
 
     var body: some View {
         ScrollView {

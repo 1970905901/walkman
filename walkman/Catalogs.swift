@@ -168,6 +168,12 @@ nonisolated struct KugouCatalogService: CatalogService {
         else { songmid = hash }
         var extras: [String: String] = ["hash": hash]
         if let id = albumId { extras["albumId"] = id }
+        // Kugou: MvHash → MV resolver hits m.kugou.com/app/i/mv.php?cmd=100.
+        // Mirrors walkman-tv's SearchCatalog. The cmd=100 endpoint frequently
+        // returns "data not found" for newer uploads, in which case
+        // MvPlayerView's "暂无可用 MV" toast surfaces the failure (parity
+        // with the TV version's behavior).
+        if let mh = d["MvHash"] as? String, !mh.isEmpty { extras["mvId"] = mh }
         // Cover URL: Kugou search returns the Image template with a {size} placeholder.
         let pic: String? = (d["Image"] as? String).flatMap { tmpl in
             tmpl.isEmpty ? nil : tmpl.replacingOccurrences(of: "{size}", with: "240")
@@ -265,6 +271,10 @@ nonisolated struct NetEaseCatalogService: CatalogService {
         var qs: [Quality] = [.k128]
         if (d["mMusic"] as? [String: Any]) != nil { qs.append(.k320) }
         if (d["hMusic"] as? [String: Any]) != nil { qs.append(.flac) }
+        // NetEase: mvid > 0 means there's an MV. Stored as String to fit the
+        // shared extras type; MvResolver parses it back.
+        var extras: [String: String] = [:]
+        if let mvid = d["mvid"] as? Int, mvid > 0 { extras["mvId"] = String(mvid) }
         return Track(
             id: Track.makeID(source: .wy, songmid: id),
             name: name,
@@ -275,7 +285,8 @@ nonisolated struct NetEaseCatalogService: CatalogService {
             songmid: id,
             duration: duration,
             picURL: pic,
-            qualities: qs
+            qualities: qs,
+            extras: extras
         )
     }
 }
@@ -346,6 +357,10 @@ nonisolated struct QQMusicCatalogService: CatalogService {
         if let m = albumMid, !m.isEmpty { extras["albumMid"] = m }
         if let smm = file["media_mid"] as? String, !smm.isEmpty { extras["strMediaMid"] = smm }
         if let sid = d["id"].map({ String(describing: $0) }) { extras["songId"] = sid }
+        // QQ Music: `mv.vid` is the MV identifier consumed by MvUrlProxy.
+        if let mv = d["mv"] as? [String: Any], let vid = mv["vid"] as? String, !vid.isEmpty {
+            extras["mvId"] = vid
+        }
         let picURL: String? = (albumMid?.isEmpty == false)
             ? "https://y.gtimg.cn/music/photo_new/T002R300x300M000\(albumMid!).jpg"
             : nil
@@ -414,6 +429,8 @@ nonisolated struct MiguCatalogService: CatalogService {
         }
         var extras: [String: String] = ["copyrightId": copyrightId]
         if let lrcURL = d["lyricUrl"] as? String { extras["lrcUrl"] = lrcURL }
+        // Migu: mvCopyrightId is the resourceId fed to /resourceinfo.do?resourceType=D.
+        if let mv = d["mvCopyrightId"] as? String, !mv.isEmpty { extras["mvId"] = mv }
         return Track(
             id: Track.makeID(source: .mg, songmid: songmid),
             name: name,

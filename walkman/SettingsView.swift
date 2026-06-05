@@ -43,6 +43,23 @@ struct SettingsView: View {
                 Text("脚本失败或未配置音源时,回落到内置直连(仅支持酷我/网易云)。如果你添加的音源能正常解析,可关闭此项严格走脚本")
             }
 
+            // iPad / Mac 发现页源选择 — iPhone 也有这个 setting 但首页是 4 个
+            // tab 各自独立,这里主要影响 IPadHomeView 拉哪些源的推荐/排行。
+            Section {
+                ForEach(homeSourceOptions, id: \.self) { src in
+                    Toggle(isOn: bindingFor(src)) {
+                        HStack(spacing: 8) {
+                            Circle().fill(src.tint).frame(width: 8, height: 8)
+                            Text(src.displayName)
+                        }
+                    }
+                }
+            } header: {
+                Text("发现页信息来源")
+            } footer: {
+                Text("勾选哪些平台的推荐歌单 / 排行榜出现在 iPad 首页。至少保留一个,否则会自动恢复全选")
+            }
+
             if !sources.loadedScripts.isEmpty {
                 Section("已加载的源") {
                     ForEach(sources.loadedScripts, id: \.id) { ls in
@@ -116,5 +133,29 @@ struct SettingsView: View {
         case .flac: return "waveform.path.ecg"
         case .flac24: return "waveform.path.ecg.rectangle"
         }
+    }
+
+    // MARK: - 发现页源 toggles
+
+    /// Order matches the iPad sidebar / search tabs:酷我 / 网易云 / 酷狗 / QQ.
+    private var homeSourceOptions: [SourceID] { [.kw, .wy, .kg, .tx] }
+
+    /// Toggle binding that prevents the user from de-selecting the last source —
+    /// an empty `homeSources` would render an empty 发现 页. Falling back to
+    /// the full set is less surprising than silently re-enabling a single source.
+    private func bindingFor(_ src: SourceID) -> Binding<Bool> {
+        Binding(
+            get: { settings.homeSources.contains(src) },
+            set: { on in
+                var s = settings.homeSources
+                if on {
+                    s.insert(src)
+                } else {
+                    s.remove(src)
+                    if s.isEmpty { s = Set(homeSourceOptions) }
+                }
+                settings.homeSources = s
+            }
+        )
     }
 }

@@ -63,7 +63,12 @@ extension CloudSync {
     enum Keys {
         static let playlists = "playlists"
         static let trackBank = "trackBank"
+        /// Legacy: only stored script names/ids. Superseded by `scripts` which
+        /// carries the full UserScript bundle (rawScript included).
         static let scriptIndex = "scriptIndex"
+        /// Full user scripts (name, version, rawScript). Subject to the KV
+        /// store's 1 MB cap — oversize bundles are silently skipped.
+        static let scripts = "scripts.v1"
         static let preferredQuality = "preferredQuality"
     }
 }

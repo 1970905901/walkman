@@ -73,6 +73,13 @@ nonisolated enum KuwoCatalog {
         if qs.isEmpty { qs = [.k128] }
 
         let albumId = decodeName(d["ALBUMID"] as? String ?? "")
+        // Kuwo: MVFLAG=="1" means the track has an MV; Kuwo's mvId is the rid
+        // itself (same as songmid). Mirrors walkman-tv's SearchCatalog behavior
+        // — even though many tracks now return "0", the badge shows up for the
+        // ones that still do, and MvResolver surfaces a "暂无可用 MV" toast
+        // when antiserver.kuwo.cn refuses.
+        var extras: [String: String] = [:]
+        if (d["MVFLAG"] as? String) == "1" { extras["mvId"] = songmid }
         return Track(
             id: Track.makeID(source: .kw, songmid: songmid),
             name: decodeName(name),
@@ -83,7 +90,8 @@ nonisolated enum KuwoCatalog {
             songmid: songmid,
             duration: duration,
             picURL: nil,
-            qualities: qs
+            qualities: qs,
+            extras: extras
         )
     }
 

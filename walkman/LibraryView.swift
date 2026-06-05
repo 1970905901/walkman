@@ -12,7 +12,9 @@ struct LibraryView: View {
     @State private var showCreate = false
     @State private var newName = ""
 
-    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+    // `adaptive(minimum: 170)` → iPhone shows 2 columns (390 px wide), iPad 3
+    // (and 4 on the largest iPads). No conditional sizeClass branch needed.
+    private let columns = [GridItem(.adaptive(minimum: 170), spacing: 14)]
 
     var body: some View {
         ScrollView {

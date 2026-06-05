@@ -37,7 +37,8 @@ struct SonglistView: View {
         Binding(get: { currentOrder }, set: { orderID = $0.id })
     }
     private var isSearching: Bool { !submittedQuery.isEmpty }
-    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+    // Adaptive columns — see LibraryView for the rationale.
+    private let columns = [GridItem(.adaptive(minimum: 170), spacing: 14)]
 
     var body: some View {
         VStack(spacing: DS.Spacing.s) {
@@ -205,7 +206,7 @@ struct SonglistView: View {
 }
 
 /// Filter sheet: 全部 + per-platform tag groups as wrapping chips.
-private struct TagFilterSheet: View {
+struct TagFilterSheet: View {
     let groups: [SonglistTagGroup]
     let isLoading: Bool
     let selected: SonglistTag

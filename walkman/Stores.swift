@@ -28,28 +28,72 @@ final class PlaylistStore: ObservableObject {
             playlists.append(PlaylistMeta(name: "我喜欢的"))
             save()
         }
+        // 清理已经存在的同名重复 — 上一版 pullFromCloud 有 dedupe bug 时
+        // 已经写到磁盘的两个 "我喜欢的" 在 load() 后会都被读进 playlists。
+        // 这里调一次 dedupeByName 让本地数据收敛。
+        let before = playlists.count
+        dedupeByName()
+        if playlists.count != before { save() }
         cloudCancellable = CloudSync.shared.didReceiveRemoteChange.sink { [weak self] in
             self?.pullFromCloud()
         }
     }
 
+    /// 按名字归并 playlists — 同名的合并曲目(union)、updatedAt 取最大。
+    /// 用于:
+    ///   1. App 启动时清理之前 bug 写入的重复数据
+    ///   2. pullFromCloud 第二遍 dedupe
+    private func dedupeByName() {
+        var deduped: [PlaylistMeta] = []
+        for p in playlists {
+            if let i = deduped.firstIndex(where: { $0.name == p.name }) {
+                var combined = deduped[i]
+                for tid in p.trackIDs where !combined.trackIDs.contains(tid) {
+                    combined.trackIDs.append(tid)
+                }
+                combined.updatedAt = max(combined.updatedAt, p.updatedAt)
+                deduped[i] = combined
+            } else {
+                deduped.append(p)
+            }
+        }
+        playlists = deduped
+    }
+
     private func pullFromCloud() {
         if let remote: [PlaylistMeta] = CloudSync.shared.pull([PlaylistMeta].self, forKey: CloudSync.Keys.playlists) {
-            // Merge: take remote if newer, otherwise keep local. Simple last-write-wins.
+            // 合并:同名歌单当成同一个,避免各端 init 时本地默认创建的
+            // "我喜欢的" 跟从其它设备同步过来的 "我喜欢的" 出现两条。
+            //   1. 先按 UUID 直接匹配 — 取 updatedAt 较新的
+            //   2. UUID 不匹配但同名 → 合并曲目(union),取最新 updatedAt
+            //   3. 既无 UUID 匹配也无同名 → 作为新歌单加入
+            // 最后再走一遍同名 dedupe(防止 remote 内部就有同名重复 +
+            // local 与 remote 之间的 dedupe 顺序问题)。
             var merged = playlists
             for r in remote {
                 if let i = merged.firstIndex(where: { $0.id == r.id }) {
                     if r.updatedAt > merged[i].updatedAt { merged[i] = r }
+                } else if let i = merged.firstIndex(where: { $0.name == r.name }) {
+                    var combined = r
+                    for tid in merged[i].trackIDs where !combined.trackIDs.contains(tid) {
+                        combined.trackIDs.append(tid)
+                    }
+                    combined.updatedAt = max(combined.updatedAt, merged[i].updatedAt)
+                    merged[i] = combined
                 } else {
                     merged.append(r)
                 }
             }
             playlists = merged
+            // 第二遍 dedupe — 防止 remote 内部就有同名重复 + local 与 remote
+            // 之间的 dedupe 处理顺序在某些 case 下漏掉的歧义
+            dedupeByName()
         }
         if let bank: [String: Track] = CloudSync.shared.pull([String: Track].self, forKey: CloudSync.Keys.trackBank) {
             trackBank.merge(bank) { local, _ in local }
         }
-        save(skipCloud: true)
+        // 推回 iCloud — 让所有设备最终收敛到同一份 UUID 列表,不会再分叉
+        save(skipCloud: false)
     }
 
     func tracks(in playlist: PlaylistMeta) -> [Track] {
@@ -132,11 +176,37 @@ final class ScriptStore: ObservableObject {
     @Published private(set) var scripts: [UserScript] = []
 
     private let url: URL
+    private var cloudCancellable: AnyCancellable?
 
     init() {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         self.url = dir.appendingPathComponent("scripts.json")
         load()
+        // Migrate from cloud if local is empty (fresh install on a 2nd device).
+        if scripts.isEmpty,
+           let remote: [UserScript] = CloudSync.shared.pull([UserScript].self, forKey: CloudSync.Keys.scripts) {
+            scripts = remote
+            save(skipCloud: true)
+        }
+        cloudCancellable = CloudSync.shared.didReceiveRemoteChange.sink { [weak self] in
+            self?.pullFromCloud()
+        }
+    }
+
+    private func pullFromCloud() {
+        guard let remote: [UserScript] = CloudSync.shared.pull([UserScript].self, forKey: CloudSync.Keys.scripts) else { return }
+        // Last-write-wins by `name + version` — script identity is the bundle,
+        // not the UUID (UUIDs differ across devices for the same script source).
+        var merged = scripts
+        for r in remote {
+            if !merged.contains(where: { $0.name == r.name && $0.version == r.version }) {
+                merged.append(r)
+            }
+        }
+        if merged.count != scripts.count {
+            scripts = merged
+            save(skipCloud: true)
+        }
     }
 
     func add(_ script: UserScript) {
@@ -195,9 +265,15 @@ final class ScriptStore: ObservableObject {
         }
     }
 
-    private func save() {
+    private func save(skipCloud: Bool = false) {
         if let data = try? JSONEncoder().encode(scripts) {
             try? data.write(to: url, options: .atomic)
+        }
+        // Push to iCloud KV — 1 MB total limit; CloudSync.push silently
+        // refuses oversize payloads so a single very large script just won't
+        // sync rather than breaking the rest of the store.
+        if !skipCloud {
+            CloudSync.shared.push(scripts, forKey: CloudSync.Keys.scripts)
         }
     }
 }
@@ -219,6 +295,15 @@ final class SettingsStore: ObservableObject {
     @Published var showLyricsOnNowPlaying: Bool {
         didSet { UserDefaults.standard.set(showLyricsOnNowPlaying, forKey: "pref.showLyricsOnNowPlaying") }
     }
+    /// Which sources contribute to the iPad/Mac "发现" page's recommendation
+    /// + leaderboard feeds. Defaults to all four mainstream sources. Stored
+    /// as a comma-joined rawValue list since UserDefaults doesn't carry Set.
+    @Published var homeSources: Set<SourceID> {
+        didSet {
+            let raw = homeSources.map(\.rawValue).sorted().joined(separator: ",")
+            UserDefaults.standard.set(raw, forKey: "pref.homeSources")
+        }
+    }
 
     init() {
         let q = UserDefaults.standard.string(forKey: "pref.quality") ?? Quality.k320.rawValue
@@ -236,6 +321,13 @@ final class SettingsStore: ObservableObject {
             self.showLyricsOnNowPlaying = true  // default on
         } else {
             self.showLyricsOnNowPlaying = UserDefaults.standard.bool(forKey: "pref.showLyricsOnNowPlaying")
+        }
+        // 发现页源:首次启动 4 个主流源全开,后续按用户勾选持久化
+        if let raw = UserDefaults.standard.string(forKey: "pref.homeSources") {
+            let ids = raw.split(separator: ",").compactMap { SourceID(rawValue: String($0)) }
+            self.homeSources = Set(ids.isEmpty ? [.kw, .wy, .kg, .tx] : ids)
+        } else {
+            self.homeSources = [.kw, .wy, .kg, .tx]
         }
     }
 }

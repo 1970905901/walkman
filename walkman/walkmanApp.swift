@@ -78,6 +78,18 @@ struct walkmanApp: App {
                 try? await Task.sleep(nanoseconds: 900_000_000)
                 withAnimation(.easeInOut(duration: 0.32)) { showSplash = false }
             }
+            // 👇 新增：在组件挂载时隐藏 Mac 端的标题栏文字
+            .onAppear {
+                #if targetEnvironment(macCatalyst)
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let titlebar = windowScene.titlebar {
+                    titlebar.titleVisibility = .hidden
+                    
+                    // 如果你希望标题栏完全透明，融合你的 ZStack 背景，可以解开下面这行的注释：
+                    // titlebar.toolbar = nil
+                }
+                #endif
+            }
         }
     }
 

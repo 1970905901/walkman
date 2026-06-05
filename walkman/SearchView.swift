@@ -283,6 +283,20 @@ struct TrackRow: View {
                     if let style = QualityBadgeStyle(highestIn: track.qualities) {
                         QualityBadge(style: style)
                     }
+                    // MV indicator — set by SearchCatalog/Boards/Songlist build()
+                    // when the per-source MV id is present. Visual: brand-tinted
+                    // outlined pill, parallels QualityBadge so the eye reads
+                    // them as the same kind of metadata chip.
+                    if track.extras["mvId"]?.isEmpty == false {
+                        Text("MV")
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .foregroundStyle(DS.Palette.brandStart)
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .stroke(DS.Palette.brandStart, lineWidth: 1)
+                            )
+                    }
                     if downloads.isDownloaded(track.id) {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.system(size: 11))
