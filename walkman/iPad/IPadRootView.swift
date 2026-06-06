@@ -79,9 +79,17 @@ struct IPadRootView: View {
         .onChange(of: rawSelection) { _, _ in
             path = NavigationPath()
         }
+        // MARK: - 针对 Mac Catalyst 优化设置弹窗交互
+        #if targetEnvironment(macCatalyst)
+        .popover(isPresented: $showSettings) {
+            NavigationStack { SettingsView() }
+                .frame(width: 520, height: 640) // 为 Mac 桌面端提供一个固定且精致的设置窗口尺寸
+        }
+        #else
         .sheet(isPresented: $showSettings) {
             NavigationStack { SettingsView() }
         }
+        #endif
     }
 
 

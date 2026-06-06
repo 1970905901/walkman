@@ -5,6 +5,15 @@ struct SettingsView: View {
     @EnvironmentObject var sources: SourceManager
     @ObservedObject private var cloud = CloudSync.shared
 
+    // 辅助编译期环境判断
+    private var isMacCatalyst: Bool {
+        #if targetEnvironment(macCatalyst)
+        return true
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         Form {
             Section {
@@ -43,8 +52,6 @@ struct SettingsView: View {
                 Text("脚本失败或未配置音源时,回落到内置直连(仅支持酷我/网易云)。如果你添加的音源能正常解析,可关闭此项严格走脚本")
             }
 
-            // iPad / Mac 发现页源选择 — iPhone 也有这个 setting 但首页是 4 个
-            // tab 各自独立,这里主要影响 IPadHomeView 拉哪些源的推荐/排行。
             Section {
                 ForEach(homeSourceOptions, id: \.self) { src in
                     Toggle(isOn: bindingFor(src)) {
@@ -111,13 +118,38 @@ struct SettingsView: View {
                 LabeledContent("版本", value: appVersion)
             }
         }
-        // Let Form translucently overlay brandedSurface so settings doesn't
-        // feel like a separate iOS shell — keeps the gradient continuity.
         .scrollContentBackground(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .brandedSurface()
         .navigationTitle("设置")
-        .navigationBarTitleDisplayMode(.large)
+        // 在 Mac Catalyst 桌面端下，inline 模式配合透明背景能展现出最完美的居中标题栏
+        .navigationBarTitleDisplayMode(isMacCatalyst ? .inline : .large)
+        
+        // MARK: - Mac Catalyst 专属：动态导航栏渲染重刷
+        #if targetEnvironment(macCatalyst)
+        .onAppear {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithTransparentBackground() // 彻底把暗红底色刷成 100% 透明
+            
+            // 🛠️ 修正这里：标题改为深色（Label 色），确保在浅色背景上清晰可见
+            appearance.titleTextAttributes = [
+                .foregroundColor: UIColor.label,
+                .font: UIFont.systemFont(ofSize: 16, weight: .semibold)
+            ]
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
+        .onDisappear {
+            // 当设置弹窗关闭时，恢复你全盘主视图的全局品牌红背景
+            let appearance = UINavigationBarAppearance()
+            appearance.backgroundColor = UIColor(DS.Palette.brandStart)
+            appearance.titleTextAttributes = [.foregroundColor: UIColor.white] // 主视图是深色底，所以用白色
+            
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
+        #endif
     }
 
     private var appVersion: String {
@@ -135,14 +167,8 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - 发现页源 toggles
-
-    /// Order matches the iPad sidebar / search tabs:酷我 / 网易云 / 酷狗 / QQ.
     private var homeSourceOptions: [SourceID] { [.kw, .wy, .kg, .tx] }
 
-    /// Toggle binding that prevents the user from de-selecting the last source —
-    /// an empty `homeSources` would render an empty 发现 页. Falling back to
-    /// the full set is less surprising than silently re-enabling a single source.
     private func bindingFor(_ src: SourceID) -> Binding<Bool> {
         Binding(
             get: { settings.homeSources.contains(src) },

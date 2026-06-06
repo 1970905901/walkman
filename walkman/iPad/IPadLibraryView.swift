@@ -1,17 +1,6 @@
 import SwiftUI
 
-// MARK: - 资料库 (iPad)
-//
-// QQ 音乐 iPad 的"我的"页面布局:
-//   - 顶部用户问候 / "继续听" hero (最近播放的歌曲 — 大封面 + 播放按钮)
-//   - "最近播放" 水平 carousel
-//   - "我喜欢" 入口卡(单独大)
-//   - "我的歌单" grid
-//
-// sidebar 已经列了"本地与下载/最近播放/听歌报告"这些入口,所以 detail pane 不再
-// 重复显示这些卡片。如果用户从 sidebar 点击具体歌单,这个视图直接被替换为
-// IPadPlaylistDetailView。
-
+// MARK: - 资料库 (iPad / Mac)
 struct IPadLibraryView: View {
     @EnvironmentObject var playlists: PlaylistStore
     @EnvironmentObject var playback: PlaybackEngine
@@ -50,8 +39,7 @@ struct IPadLibraryView: View {
         }
     }
 
-    // MARK: Header
-
+    // MARK: - Header
     private var headerRow: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
@@ -79,8 +67,7 @@ struct IPadLibraryView: View {
         .padding(.top, 8)
     }
 
-    // MARK: Continue listening hero
-
+    // MARK: - Continue listening hero
     @ViewBuilder
     private var continueListening: some View {
         if let last = recentTracks.first {
@@ -114,6 +101,7 @@ struct IPadLibraryView: View {
                             .foregroundStyle(Color.white)
                         }
                         .buttonStyle(.plain)
+                        
                         Button {
                             path.append(IPadDestination.history)
                         } label: {
@@ -132,17 +120,12 @@ struct IPadLibraryView: View {
                 Spacer(minLength: 0)
             }
             .padding(24)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(.regularMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(DS.Palette.strokeSubtle, lineWidth: 0.5)
-            )
+            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.regularMaterial))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Palette.strokeSubtle, lineWidth: 0.5))
         }
     }
 
+    // MARK: - Recent Carousel
     private var recentCarousel: some View {
         VStack(alignment: .leading, spacing: 14) {
             IPadSectionHeader("最近播放") {
@@ -172,24 +155,41 @@ struct IPadLibraryView: View {
         }
     }
 
+    // MARK: - 我的歌单 (已完美对齐 iPhone 四宫格矩阵逻辑)
     private var playlistGrid: some View {
         VStack(alignment: .leading, spacing: 14) {
             IPadSectionHeader("我的歌单", subtitle: "\(playlists.playlists.count) 个")
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 170), spacing: 18)],
-                spacing: 22
+                columns: [GridItem(.adaptive(minimum: 160), spacing: 18)],
+                spacing: 24
             ) {
                 ForEach(playlists.playlists) { p in
                     Button {
+                        // 维持 iPad 的多端路由导航
                         path.append(IPadDestination.playlist(p.id))
                     } label: {
-                        IPadAlbumCard(
-                            imageURL: playlists.tracks(in: p).first?.picURL,
-                            title: p.name,
-                            subtitle: "\(p.trackIDs.count) 首",
-                            fallbackTint: DS.Palette.brandStart,
-                            size: 160
-                        )
+                        // 采用 iPhone 统一的规范化卡片骨架
+                        VStack(alignment: .leading, spacing: 10) {
+                            let tracksInPlaylist = playlists.tracks(in: p)
+                            let coverURLs = Array(tracksInPlaylist.prefix(4).map { $0.picURL })
+                            
+                            // 四宫格拼图组件：彻底去掉写死的 R 尺寸，改用弹性比
+                            CoverMosaicView(urls: coverURLs)
+                                .aspectRatio(1, contentMode: .fit)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+                            
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(p.name)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(DS.Palette.textPrimary)
+                                    .lineLimit(1)
+                                Text("\(p.trackIDs.count) 首")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(DS.Palette.textTertiary)
+                            }
+                            .padding(.leading, 2)
+                        }
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -202,5 +202,69 @@ struct IPadLibraryView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - 完美的四宫格拼图组件 (从 iPhone 端无缝平移并重命名防止冲突)
+struct CoverMosaicView: View {
+    let urls: [String?]
+
+    var body: some View {
+        GeometryReader { geo in
+            let s = geo.size.width / 2
+            let validUrls = urls.compactMap { $0 }
+            
+            if validUrls.isEmpty {
+                placeholder
+            } else if validUrls.count == 1 {
+                cover(validUrls[0], size: geo.size.width)
+            } else {
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        cover(urls[safe: 0] ?? nil, size: s)
+                        cover(urls[safe: 2] ?? nil, size: s)
+                    }
+                    VStack(spacing: 0) {
+                        cover(urls[safe: 1] ?? nil, size: s)
+                        cover(urls[safe: 3] ?? nil, size: s)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cover(_ url: String?, size: CGFloat) -> some View {
+        AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
+            switch phase {
+            case .success(let img):
+                img.resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipped()
+            default:
+                Color(.tertiarySystemFill)
+                    .frame(width: size, height: size)
+            }
+        }
+    }
+
+    private var placeholder: some View {
+        LinearGradient(
+            colors: [Color(.tertiarySystemFill), Color(.quaternarySystemFill)],
+            startPoint: .topLeading, endPoint: .bottomTrailing
+        )
+        .overlay(
+            Image(systemName: "music.note.list")
+                .font(.system(size: 32))
+                .foregroundColor(.secondary.opacity(0.6))
+        )
+    }
+}
+
+// MARK: - 越界保护安全扩展
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
