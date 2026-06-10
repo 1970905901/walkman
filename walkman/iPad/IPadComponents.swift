@@ -227,13 +227,35 @@ struct IPadAlbumCard: View {
 /// 4-column row used in iPad track lists / playlist details / search results:
 ///   [#][cover][title // singer][album][duration][actions]
 /// The album column appears only when there's space (>= 720pt content width).
+///
+/// Actions (收藏 / 下载 / 复制 / 分享) appear in both the visible "..." Menu
+/// (iPad-native) and the `.contextMenu` long-press. Mirrors `TrackRowSwipe` on
+/// iPhone so search/leaderboard/songlist rows on iPad get the same toolkit,
+/// even though LazyVStack can't host `.swipeActions`.
+///
+/// **Sheet state lives in the parent**, not in the row. Per-row `.sheet` modifiers
+/// inside a LazyVStack get invalidated when SwiftUI recycles offscreen rows — on
+/// Mac Catalyst this means the sheet stays visible but its `@Environment(\.dismiss)`
+/// has no live parent to drive, so Cancel becomes a no-op. The parent passes
+/// `onAddToPlaylist` / `onDownload` callbacks; it owns the @State and presents
+/// the sheets itself.
 struct IPadTrackRow: View {
     let index: Int?
     let track: Track
     let isPlaying: Bool
     let onTap: () -> Void
-    let onMenu: () -> Void
+    let onAddToPlaylist: (Track) -> Void
+    let onDownload: (Track) -> Void
+    /// Optional "remove from this collection" — for example, removing a track from a
+    /// user playlist row. nil for read-only sources like search/leaderboard.
+    var onRemove: (() -> Void)? = nil
     @State private var hovering = false
+
+    private var shareText: String {
+        var s = track.name
+        if !track.singer.isEmpty { s += " - \(track.singer)" }
+        return s
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -292,14 +314,18 @@ struct IPadTrackRow: View {
                     .frame(width: 52, alignment: .trailing)
             }
 
-            Button(action: onMenu) {
+            Menu {
+                trackActionItems
+            } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(DS.Palette.textTertiary)
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .opacity(hovering ? 1 : 0.4)
         }
         .padding(.horizontal, 18)
@@ -311,6 +337,27 @@ struct IPadTrackRow: View {
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
         .onHover { hovering = $0 }
+        // 长按菜单 — 给 LazyVStack 里的行补上 iPhone List 那种 trackRowSwipe 的长按入口。
+        // iPad 上 LazyVStack 不支持 .swipeActions,所以长按 + 右边 "..." 菜单是两条等价的路径。
+        .contextMenu { trackActionItems }
+    }
+
+    /// Same set of items used by both the "..." Menu and the long-press contextMenu —
+    /// mirrors `TrackRowSwipe.contextMenu` on iPhone so users get the same toolkit
+    /// regardless of device.
+    @ViewBuilder
+    private var trackActionItems: some View {
+        Button { onAddToPlaylist(track) } label: { Label("收藏", systemImage: "heart") }
+        Button { onDownload(track) } label: { Label("下载", systemImage: "arrow.down.circle") }
+        Divider()
+        Button {
+            UIPasteboard.general.string = shareText
+        } label: { Label("复制歌曲信息", systemImage: "doc.on.doc") }
+        ShareLink(item: shareText) { Label("分享", systemImage: "square.and.arrow.up") }
+        if let onRemove {
+            Divider()
+            Button(role: .destructive, action: onRemove) { Label("从歌单移除", systemImage: "trash") }
+        }
     }
 
     private func formatDuration(_ sec: Int) -> String {

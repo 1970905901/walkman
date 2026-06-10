@@ -143,12 +143,7 @@ final class JSScriptRuntime {
     private func sendToScript(action: String, payload: Any?) {
         let dataString: String
         if let payload {
-            if let data = try? JSONSerialization.data(withJSONObject: payload),
-               let s = String(data: data, encoding: .utf8) {
-                dataString = s
-            } else {
-                dataString = "null"
-            }
+            dataString = Self.safeJSONString(from: payload)
         } else {
             dataString = ""
         }
@@ -158,6 +153,104 @@ final class JSScriptRuntime {
         } else {
             native?.call(withArguments: [key, action, dataString])
         }
+    }
+
+    /// 安全地把任意 payload 编码成 JSON 字符串。
+    ///
+    /// **不能直接 `try? JSONSerialization.data(...)`** —— `JSONSerialization` 遇到
+    /// 无法编码的对象(NaN / Infinity 的 NSNumber、非 String 的字典 key、raw Data、
+    /// JSValue 包装、循环引用等)会抛 Objective-C `NSException`,**Swift 的 `try?` 不接
+    /// NSException**,直接 abort 进程。
+    ///
+    /// 同时:`isValidJSONObject(_:)` 对**顶层不是 array/dict 的"原子值"返回 false**
+    /// (Int / String / NSNull 等),但这些值其实是合法的 JSON fragment,
+    /// 脚本端拿到 `"5"` 就能 `JSON.parse` 出 Int。`sendToScript` 在
+    /// `__set_timeout__` 通路上正是传的 `Int`,顶层原子值 —— 走 isValidJSONObject
+    /// 会被误判,导致 setTimeout 回调 ID 丢失、脚本卡死。所以这里要分两条路。
+    private static func safeJSONString(from payload: Any) -> String {
+        // 路径 1:容器(dict / array)走标准 isValidJSONObject + serialize。
+        if let s = serializeContainer(payload) { return s }
+        // 路径 2:顶层原子值(Int / String / Bool / NSNull) —— 直接拼 JSON 字面量,
+        // 绕过 isValidJSONObject 的"必须是容器"硬性要求。
+        if let s = serializePrimitive(payload) { return s }
+        // 路径 3:容器里夹了无法编码的值 —— 跑一遍 sanitizer 再试一次。
+        let sanitized = sanitizeForJSON(payload)
+        if let s = serializeContainer(sanitized) { return s }
+        if let s = serializePrimitive(sanitized) { return s }
+        print("[JSRuntime] payload not JSON-encodable even after sanitize, sending null")
+        return "null"
+    }
+
+    /// 容器路径 —— 用 isValidJSONObject 把异常拦截在 ObjC 抛出之前。
+    private static func serializeContainer(_ obj: Any) -> String? {
+        guard JSONSerialization.isValidJSONObject(obj) else { return nil }
+        guard let data = try? JSONSerialization.data(withJSONObject: obj) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// 原子值路径 —— 自己拼 JSON literal,这样 `Int(5)` 输出 `"5"`,而不是
+    /// 退化成 `"null"`(后者会让脚本的 `JSON.parse` 出 `null` → 查 callbacks[null] → 卡死)。
+    private static func serializePrimitive(_ obj: Any) -> String? {
+        if obj is NSNull { return "null" }
+        // NSNumber 在 ObjC 桥下既可能是 Bool 也可能是 Int/Double —— 用 objCType 区分。
+        // Swift Bool / NSNumber(value: true) 的 objCType 是 "c" 或 "B"。
+        if let n = obj as? NSNumber {
+            let type = String(cString: n.objCType)
+            if type == "c" || type == "B" {
+                return n.boolValue ? "true" : "false"
+            }
+            let d = n.doubleValue
+            if d.isNaN || d.isInfinite { return "null" }
+            if let i = Int(exactly: n) { return String(i) }
+            return String(d)
+        }
+        if let s = obj as? String {
+            // 借 JSONSerialization 自己的 escape 逻辑(fragmentsAllowed 才接受原子值)。
+            if let data = try? JSONSerialization.data(withJSONObject: s, options: [.fragmentsAllowed]),
+               let str = String(data: data, encoding: .utf8) {
+                return str
+            }
+        }
+        return nil
+    }
+
+    /// 递归把 Swift/ObjC 值清洗成 JSON-safe 形式。
+    /// 策略:
+    /// - dict:key 转 String,value 递归
+    /// - array:每个元素递归
+    /// - NSNumber:NaN / Infinity → NSNull
+    /// - Data:base64 字符串(脚本想自己解码就解)
+    /// - String / Bool / 普通 NSNumber / NSNull:原样
+    /// - 其它(包括 JSValue、未知 ObjC 对象):`String(describing:)` 退化为可读字符串
+    private static func sanitizeForJSON(_ obj: Any) -> Any {
+        if let n = obj as? NSNumber {
+            // NSNumber 涵盖了 Bool / Int / Double 等,先单独看 Double 的特殊值。
+            // 用 CFGetTypeID 区分 Bool 和数值会更严谨,但 NaN/Inf 一律置 null 就够。
+            let d = n.doubleValue
+            if d.isNaN || d.isInfinite { return NSNull() }
+            return n
+        }
+        if obj is NSNull { return obj }
+        if let s = obj as? String { return s }
+        if let dict = obj as? [String: Any] {
+            var out: [String: Any] = [:]
+            for (k, v) in dict { out[k] = sanitizeForJSON(v) }
+            return out
+        }
+        if let dict = obj as? [AnyHashable: Any] {
+            // 非 String key 的 dict:强转 key,丢掉转不了的。
+            var out: [String: Any] = [:]
+            for (k, v) in dict { out[String(describing: k)] = sanitizeForJSON(v) }
+            return out
+        }
+        if let arr = obj as? [Any] {
+            return arr.map { sanitizeForJSON($0) }
+        }
+        if let data = obj as? Data {
+            return data.base64EncodedString()
+        }
+        // 兜底:脚本回包里 JSValue / 自定义类 / 函数等无法编码的东西,降级成可读字符串。
+        return String(describing: obj)
     }
 
     // MARK: - Native callbacks installed before preload runs
@@ -190,9 +283,9 @@ final class JSScriptRuntime {
         // utils_b642buf — returns JSON string of byte array (preload does JSON.parse)
         let b642buf: @convention(block) (String) -> String = { b64 in
             guard let bytes = CryptoBridge.base64DecodeToBytes(b64) else { return "[]" }
-            if let data = try? JSONSerialization.data(withJSONObject: bytes),
-               let s = String(data: data, encoding: .utf8) { return s }
-            return "[]"
+            // [UInt8] 理论上一定是合法 JSON array,但 isValidJSONObject 加上没坏处 ——
+            // 同样防 NSException 把进程带走。
+            return Self.safeJSONString(from: bytes)
         }
         context.setObject(b642buf, forKeyedSubscript: "__lx_native_call__utils_b642buf" as NSString)
 

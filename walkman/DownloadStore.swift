@@ -37,23 +37,64 @@ final class DownloadStore: ObservableObject {
 
     /// Injected by the app so downloads reuse the same URL resolution as playback.
     var urlResolver: ((Track, Quality) async throws -> URL)?
+    /// 拉歌词 —— 沿用 PlaybackEngine.setLyricsResolver 同款依赖注入,DownloadStore
+    /// 不直接知道 SourceManager / LyricsFetcher 是什么。下载完会用这个去拉歌词,
+    /// 然后跟封面一起写进文件 metadata。
+    var lyricsResolver: ((Track) async -> [LyricLine])?
 
-    private let dir: URL
+    /// 新下载会落到这里。
+    /// - iPad / iPhone: 沙盒 `Documents/Downloads/`
+    /// - Mac Catalyst: `~/Music/Walkman/` —— 用户能直接在 Finder / 系统音乐 app 里看到
+    private let primaryDir: URL
+    /// 旧位置(沙盒 `Documents/Downloads/`)。只在 Mac 上有值,作为 lazy fallback ——
+    /// 用户切换到新版本之前已经存在的下载不会消失,localURL 会先查 primary 再查 legacy。
+    private let legacyDir: URL?
     private let foldersURL: URL
     private let recordsURL: URL
     private var runners: [String: FileDownloader] = [:]   // trackID → active downloader
 
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        self.dir = docs.appendingPathComponent("Downloads", isDirectory: true)
+        let legacy = docs.appendingPathComponent("Downloads", isDirectory: true)
+        // JSON 状态文件永远跟 app 走(沙盒 Documents),不动它,免得迁移踩坑。
         self.foldersURL = docs.appendingPathComponent("downloadFolders.json")
         self.recordsURL = docs.appendingPathComponent("downloadRecords.json")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        #if targetEnvironment(macCatalyst)
+        // Mac 走 ~/Music/Walkman。如果建不出来(权限 / sandbox 没批 entitlement),
+        // 落回沙盒 Documents/Downloads,功能不至于挂。
+        let musicRoot = FileManager.default.urls(for: .musicDirectory, in: .userDomainMask).first
+        let preferred = musicRoot?.appendingPathComponent("Walkman", isDirectory: true)
+        if let preferred,
+           ((try? FileManager.default.createDirectory(at: preferred, withIntermediateDirectories: true)) != nil) {
+            self.primaryDir = preferred
+            self.legacyDir = legacy
+        } else {
+            self.primaryDir = legacy
+            self.legacyDir = nil
+        }
+        #else
+        self.primaryDir = legacy
+        self.legacyDir = nil
+        #endif
+
+        try? FileManager.default.createDirectory(at: primaryDir, withIntermediateDirectories: true)
         load()
         if folders.isEmpty {
             folders = [DownloadFolder(name: "默认")]
             save()
         }
+    }
+
+    /// 解析一个 trackID 对应的本地文件 URL —— primary 先看,没有再去 legacy(只 Mac 有)。
+    private func resolveExistingURL(fileName: String) -> URL? {
+        let primary = primaryDir.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: primary.path) { return primary }
+        if let legacy = legacyDir?.appendingPathComponent(fileName),
+           FileManager.default.fileExists(atPath: legacy.path) {
+            return legacy
+        }
+        return nil
     }
 
     // MARK: - Queries
@@ -63,8 +104,7 @@ final class DownloadStore: ObservableObject {
     /// Local file URL for a completed download, or nil.
     func localURL(for trackID: String) -> URL? {
         guard let rec = records[trackID], rec.status == .completed else { return nil }
-        let url = dir.appendingPathComponent(rec.fileName)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        return resolveExistingURL(fileName: rec.fileName)
     }
 
     func quality(for trackID: String) -> Quality? { records[trackID]?.quality }
@@ -135,7 +175,7 @@ final class DownloadStore: ObservableObject {
             fail(track.id, error.localizedDescription)
             return
         }
-        let dest = dir.appendingPathComponent(fileName)
+        let dest = primaryDir.appendingPathComponent(fileName)
         let runner = FileDownloader()
         runners[track.id] = runner
         runner.start(
@@ -153,6 +193,9 @@ final class DownloadStore: ObservableObject {
                     case .success:
                         self.records[track.id]?.status = .completed
                         self.records[track.id]?.errorMessage = nil
+                        // 元数据写入是 best-effort 的后置步骤:歌曲已经是"下载完成"
+                        // 状态了,标签写不上属于次要问题,失败不回滚成功状态。
+                        self.embedMetadata(for: track, at: dest)
                     case .failure(let err):
                         self.fail(track.id, err.localizedDescription)
                     }
@@ -160,6 +203,62 @@ final class DownloadStore: ObservableObject {
                 }
             }
         )
+    }
+
+    // MARK: - Metadata embedding
+
+    /// 下载完成后异步拉封面 + 歌词,把它们 + track 信息一起写进音频文件 (ID3v2 或 FLAC tag)。
+    /// 这一步是 fire-and-forget —— 失败不影响下载状态,日志输出而已。
+    private func embedMetadata(for track: Track, at fileURL: URL) {
+        let lyricsResolver = self.lyricsResolver
+        Task.detached(priority: .utility) {
+            // 1) 封面 —— track.picURL 不一定有,有的话 URLSession 抓字节;
+            //    MIME 类型尽量从 HTTP response 拿,拿不到就按 URL 后缀猜。
+            var coverData: Data? = nil
+            var coverMIME: String? = nil
+            if let urlStr = track.picURL, let url = URL(string: urlStr) {
+                do {
+                    var req = URLRequest(url: url)
+                    req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+                                 forHTTPHeaderField: "User-Agent")
+                    req.timeoutInterval = 15
+                    let (data, response) = try await URLSession.shared.data(for: req)
+                    coverData = data
+                    if let http = response as? HTTPURLResponse,
+                       let ct = http.value(forHTTPHeaderField: "Content-Type"),
+                       ct.hasPrefix("image/") {
+                        // 形如 "image/jpeg; charset=binary" —— 取分号前。
+                        coverMIME = ct.split(separator: ";").first.map(String.init)
+                    } else {
+                        switch url.pathExtension.lowercased() {
+                        case "png":  coverMIME = "image/png"
+                        case "webp": coverMIME = "image/webp"
+                        default:     coverMIME = "image/jpeg"
+                        }
+                    }
+                } catch {
+                    print("[Download] 封面抓取失败: \(error.localizedDescription)")
+                }
+            }
+
+            // 2) 歌词 —— resolver 是注入的 LyricsFetcher 入口。
+            var lrcText: String? = nil
+            if let resolver = lyricsResolver {
+                let lines = await resolver(track)
+                if !lines.isEmpty {
+                    lrcText = LRCSerializer.serialize(lines)
+                }
+            }
+
+            // 3) 写入,扩展名分发到 MP3 / FLAC writer。
+            AudioMetadataWriter.apply(
+                to: fileURL,
+                track: track,
+                coverData: coverData,
+                coverMIME: coverMIME,
+                lrcText: lrcText
+            )
+        }
     }
 
     private func fail(_ trackID: String, _ message: String) {
@@ -187,8 +286,11 @@ final class DownloadStore: ObservableObject {
 
     private func removeFile(for trackID: String) {
         guard let rec = records[trackID] else { return }
-        let url = dir.appendingPathComponent(rec.fileName)
-        try? FileManager.default.removeItem(at: url)
+        // 两个位置都试着删 —— Mac 上可能存在 legacy 留下的老文件。
+        try? FileManager.default.removeItem(at: primaryDir.appendingPathComponent(rec.fileName))
+        if let legacy = legacyDir?.appendingPathComponent(rec.fileName) {
+            try? FileManager.default.removeItem(at: legacy)
+        }
     }
 
     // MARK: - Persistence

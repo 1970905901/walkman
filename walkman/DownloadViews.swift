@@ -4,6 +4,9 @@ import SwiftUI
 
 struct DownloadSheet: View {
     let track: Track
+    /// 可选 close 回调,见 AddToPlaylistSheet.onClose。默认 nil,toolbar 取消按钮
+    /// 走原生 dismiss() 路径。
+    var onClose: (() -> Void)? = nil
     @EnvironmentObject var downloads: DownloadStore
     @Environment(\.dismiss) private var dismiss
 
@@ -12,12 +15,18 @@ struct DownloadSheet: View {
     @State private var showNewFolder = false
     @State private var newFolderName = ""
 
-    init(track: Track) {
+    init(track: Track, onClose: (() -> Void)? = nil) {
         self.track = track
+        self.onClose = onClose
         let qs = track.qualities.isEmpty ? [.k320] : track.qualities
         let best: Quality = qs.contains(.flac24) ? .flac24 : qs.contains(.flac) ? .flac : qs.contains(.k320) ? .k320 : .k128
         _quality = State(initialValue: best)
         _folderID = State(initialValue: DownloadStore.shared.folders.first?.id ?? UUID())
+    }
+
+    private func closeNow() {
+        onClose?()
+        dismiss()
     }
 
     private var availableQualities: [Quality] {
@@ -61,7 +70,7 @@ struct DownloadSheet: View {
                 Section {
                     Button {
                         downloads.download(track: track, quality: quality, folderID: folderID)
-                        dismiss()
+                        closeNow()
                     } label: {
                         HStack {
                             Spacer()
@@ -76,10 +85,15 @@ struct DownloadSheet: View {
             .navigationTitle("下载")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("取消") { dismiss() }
+                // 见 AddToPlaylistSheet —— Mac 走 popover,不显示多余的取消按钮。
+                #if !targetEnvironment(macCatalyst)
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { closeNow() }
                 }
+                #endif
             }
+            .toolbarBackground(.thinMaterial, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .alert("新建子歌单", isPresented: $showNewFolder) {
                 TextField("名称", text: $newFolderName)
                 Button("取消", role: .cancel) { newFolderName = "" }

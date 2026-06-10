@@ -141,13 +141,11 @@ struct SettingsView: View {
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
         .onDisappear {
-            // 当设置弹窗关闭时，恢复你全盘主视图的全局品牌红背景
-            let appearance = UINavigationBarAppearance()
-            appearance.backgroundColor = UIColor(DS.Palette.brandStart)
-            appearance.titleTextAttributes = [.foregroundColor: UIColor.white] // 主视图是深色底，所以用白色
-            
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            // 关闭时恢复到 walkmanApp 启动时设的默认外观 —— 之前这里把全局 UINavigationBar
+            // 改成品牌红 + 白字,但应用根本就没有红色导航栏的设计,这个"恢复"是凭空造出来
+            // 的状态,会污染后续所有 NavigationStack(包括 sheet 里的导航栏,典型表现就是
+            // 收藏/下载弹窗顶部出现一条丑陋的暗红色 bar 配白字标题)。
+            AppNavBarAppearance.applyDefault()
         }
         #endif
     }

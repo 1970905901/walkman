@@ -3,6 +3,11 @@ import UIKit
 
 @main
 struct walkmanApp: App {
+    /// Mac Catalyst 关掉"窗口关闭 = 退出 app"行为靠 WalkmanAppDelegate 暴露的
+    /// `applicationShouldTerminateAfterLastWindowClosed:` —— Catalyst runtime
+    /// 会自动把 NSApplicationDelegate 调用转发到我们的 UIApplicationDelegate。
+    @UIApplicationDelegateAdaptor(WalkmanAppDelegate.self) private var appDelegate
+
     @StateObject private var playback = PlaybackEngine()
     @StateObject private var sources = SourceManager()
     @StateObject private var playlists = PlaylistStore()
@@ -22,23 +27,7 @@ struct walkmanApp: App {
     @State private var showSplash = true
 
     init() {
-        configureAppearance()
-    }
-
-    /// Global UIKit appearance: rounded inline titles + PingFang large titles to give
-    /// Chinese headings real character (default SF Pro renders 汉字 with the system
-    /// fallback, which looks generic). Tint stays driven by AccentColor.
-    private func configureAppearance() {
-        let nav = UINavigationBarAppearance()
-        nav.configureWithDefaultBackground()
-        let inlineFont = UIFont.systemFont(ofSize: 17, weight: .semibold)
-        let largeFont = UIFont(name: "PingFangSC-Semibold", size: 32)
-            ?? UIFont.systemFont(ofSize: 32, weight: .bold)
-        nav.titleTextAttributes = [.font: inlineFont]
-        nav.largeTitleTextAttributes = [.font: largeFont]
-        UINavigationBar.appearance().standardAppearance = nav
-        UINavigationBar.appearance().scrollEdgeAppearance = nav
-        UINavigationBar.appearance().compactAppearance = nav
+        AppNavBarAppearance.applyDefault()
     }
 
     var body: some Scene {
@@ -72,6 +61,10 @@ struct walkmanApp: App {
                 recents.bind(to: playback)
                 commandBridge.start(playback: playback, sources: sources)
                 playback.bindEQ(eq)
+                // Mac 状态栏图标 + 下拉菜单 —— iOS 下是 no-op stub。
+                // 必须在 PlaybackEngine 已经创建之后 install,这样 Combine
+                // 订阅当前歌曲 / 播放状态时直接拿到 publisher。
+                MacStatusBarController.shared.install(playback: playback)
                 await bootstrap()
                 // Splash lives for ~900ms — long enough for the spring reveal,
                 // short enough not to feel like a wait.
@@ -99,6 +92,10 @@ struct walkmanApp: App {
         downloads.urlResolver = { [sources] track, quality in
             try await sources.resolveMusicURL(track: track, quality: quality).url
         }
+        // 下载完成后写 metadata 时用 —— 跟 PlaybackEngine 共用 LyricsFetcher 的缓存。
+        downloads.lyricsResolver = { [sources] track in
+            await LyricsFetcher.shared.fetch(for: track, sources: sources)
+        }
         playback.setURLResolver { [sources, settings, playback, downloads] track in
             // Prefer a local downloaded file — plays offline and skips the network entirely.
             if let local = await MainActor.run(body: { downloads.localURL(for: track.id) }) {
@@ -122,5 +119,32 @@ struct walkmanApp: App {
         }
         // Bring back the queue + position from the previous session (paused, no autoplay).
         playback.restoreLastSession()
+    }
+}
+
+// MARK: - App-level UINavigationBar baseline
+
+/// One source of truth for the app's UINavigationBar appearance.
+///
+/// Any screen that temporarily overrides `UINavigationBar.appearance()`
+/// (e.g. `SettingsView` swaps to a transparent bar while it's open) MUST call
+/// `applyDefault()` in `.onDisappear` to put the baseline back. Restoring to
+/// an invented "brand red" value (the previous bug) poisoned every sheet
+/// presented afterwards because UIKit appearance proxies are global state.
+enum AppNavBarAppearance {
+    /// Rounded inline titles + PingFang large titles to give Chinese headings
+    /// real character (default SF Pro renders 汉字 with the system fallback,
+    /// which looks generic). Tint stays driven by AccentColor.
+    static func applyDefault() {
+        let nav = UINavigationBarAppearance()
+        nav.configureWithDefaultBackground()
+        let inlineFont = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        let largeFont = UIFont(name: "PingFangSC-Semibold", size: 32)
+            ?? UIFont.systemFont(ofSize: 32, weight: .bold)
+        nav.titleTextAttributes = [.font: inlineFont]
+        nav.largeTitleTextAttributes = [.font: largeFont]
+        UINavigationBar.appearance().standardAppearance = nav
+        UINavigationBar.appearance().scrollEdgeAppearance = nav
+        UINavigationBar.appearance().compactAppearance = nav
     }
 }

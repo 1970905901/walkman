@@ -8,6 +8,12 @@ import SwiftUI
 
 struct IPadSearchView: View {
     @EnvironmentObject var playback: PlaybackEngine
+    /// 显式引用 playlists / downloads,这样在挂 .sheet 时可以手动 .environmentObject(...)
+    /// 透传给 sheet 内容。SwiftUI 的 sheet 默认会继承 env,但 Mac Catalyst 上挂在
+    /// LazyVStack 的 NavigationStack 外层的 .sheet 不可靠 —— 实测会冒 "No ObservableObject
+    /// of type DownloadStore found",显式透传可消除歧义。
+    @EnvironmentObject var playlists: PlaylistStore
+    @EnvironmentObject var downloads: DownloadStore
     @AppStorage("search.history") private var historyJSON: String = "[]"
     @State private var keyword: String = ""
     @State private var submitted: String = ""
@@ -20,6 +26,13 @@ struct IPadSearchView: View {
     @State private var loadingPlaylists = false
     @State private var navPath = NavigationPath()
     @FocusState private var focused: Bool
+
+    /// 收藏 / 下载弹窗的 state 提到这一层(不挂在 row 上),原因见 IPadTrackRow 的注释 —
+    /// LazyVStack 的子 view 会被回收,挂在 row 上的 .sheet 在 Mac Catalyst 上会丢失
+    /// dismiss 的目标 view,导致取消按钮无效。这里跟 PlayerView/IPadPlayerView 的模式
+    /// 完全对齐:`.sheet(item:)` 配合一个稳定的 parent。
+    @State private var trackToFavorite: Track?
+    @State private var trackToDownload: Track?
 
     private let tabs: [SearchScope] = [
         .all, .source(.kw), .source(.wy), .source(.kg), .source(.tx),
@@ -45,6 +58,37 @@ struct IPadSearchView: View {
             }
         }
         .background(IPad.Color.contentBackground)
+        // Sheets owned by the search view (NOT by the row) — see IPadTrackRow's note.
+        // `.sheet(item:)` + `.inheritedAppearance()` is the same pattern used in
+        // PlayerView/IPadPlayerView, which works on Mac Catalyst.
+        // Mac Catalyst → .popover, iPad → .sheet ——
+        // 直接抄 IPadRootView 设置弹窗(`showSettings`)那套已经在用的模式。
+        // popover 在 Mac 上是浮动面板,自带"点外面关闭 / Esc 关闭",
+        // toolbar 取消按钮也能正常响应,不会被 sheet 的 UIKit hosting 桥吞点击。
+        // env objects 显式透传,免得受 Mac 隐式继承不稳定的影响。
+        #if targetEnvironment(macCatalyst)
+        .popover(item: $trackToFavorite) { t in
+            AddToPlaylistSheet(track: t)
+                .environmentObject(playlists)
+                .frame(width: 480, height: 560)
+        }
+        .popover(item: $trackToDownload) { t in
+            DownloadSheet(track: t)
+                .environmentObject(downloads)
+                .frame(width: 480, height: 600)
+        }
+        #else
+        .sheet(item: $trackToFavorite) { t in
+            AddToPlaylistSheet(track: t)
+                .environmentObject(playlists)
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $trackToDownload) { t in
+            DownloadSheet(track: t)
+                .environmentObject(downloads)
+                .presentationDragIndicator(.visible)
+        }
+        #endif
     }
 
     // MARK: Bar / Hero
@@ -197,7 +241,8 @@ struct IPadSearchView: View {
                                 playback.play(track: t, in: results, startIndex: idx)
                                 pushHistory(submitted)
                             },
-                            onMenu: { /* TODO: context menu */ }
+                            onAddToPlaylist: { trackToFavorite = $0 },
+                            onDownload: { trackToDownload = $0 }
                         )
                     }
                     if loadingScopes.contains(selectedScope) && results.isEmpty

@@ -45,7 +45,20 @@ final class EQAudioTap: ObservableObject {
         /// Latest RMS calculated by the process callback. Read on the main
         /// thread via the smoothing displayLink.
         var rawLevel: Float = 0
-        var lock = os_unfair_lock()
+        /// **Heap-allocated** lock so the pointer is rock-stable across threads,
+        /// independent of any Swift exclusivity / inout shenanigans around taking
+        /// `&self.lock` on a class stored property. The audio thread and the main
+        /// thread both pass this raw pointer straight to `os_unfair_lock_lock`,
+        /// no `&` operator, no Swift access machinery in the way.
+        let lock: UnsafeMutablePointer<os_unfair_lock_s>
+        init() {
+            lock = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
+            lock.initialize(to: os_unfair_lock())
+        }
+        deinit {
+            lock.deinitialize(count: 1)
+            lock.deallocate()
+        }
     }
     let state = State()
 
@@ -73,15 +86,15 @@ final class EQAudioTap: ObservableObject {
                 gainDB: resized[idx]
             ))
         }
-        os_unfair_lock_lock(&state.lock)
+        os_unfair_lock_lock(state.lock)
         state.coefficients = newCoeffs
-        os_unfair_lock_unlock(&state.lock)
+        os_unfair_lock_unlock(state.lock)
     }
 
     func setEnabled(_ enabled: Bool) {
-        os_unfair_lock_lock(&state.lock)
+        os_unfair_lock_lock(state.lock)
         state.enabled = enabled
-        os_unfair_lock_unlock(&state.lock)
+        os_unfair_lock_unlock(state.lock)
     }
 
     init() {
@@ -137,25 +150,40 @@ final class EQAudioTap: ObservableObject {
     // MARK: - Tap setup
 
     private func setupTap() {
+        // Hand the audio thread a **retained** ref so it can never deref freed memory.
+        // 之前用的是 passUnretained —— 一旦 EQAudioTap 在 audio callback 还在飞的时候
+        // 被 PlaybackEngine 释放,storage 指向的 State 就被 release 了,audio 线程下
+        // 一拍调 `os_unfair_lock_lock(s.lock)` 拿到的是 freed/garbage 内存,
+        // libplatform 会把它当成 "lock corrupt / owner thread exited without unlocking"
+        // 然后 SIGKILL。crash trace 就是这个签名(EXC_BREAKPOINT + Abort Cause 15920)。
+        // passRetained + 在 finalize 里 release 是 Core Audio + Swift class 的标准做法 ——
+        // tap 自己持一份 State 的强引用,callbacks 一定能看到活的内存。MTAudioProcessingTap
+        // 自己被释放时会触发 finalize,在那里 release,生命周期就闭环了。
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
-            clientInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(state).toOpaque()),
+            clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(state).toOpaque()),
             init: { _, clientInfo, tapStorageOut in
                 tapStorageOut.pointee = clientInfo
             },
-            finalize: { _ in },
+            finalize: { tap in
+                // Balance the passRetained above. After this runs, no more callbacks
+                // will fire on this tap (per Core Audio contract), so it's safe to
+                // drop the strong ref the audio thread was holding.
+                let storage = MTAudioProcessingTapGetStorage(tap)
+                Unmanaged<State>.fromOpaque(storage).release()
+            },
             prepare: { tap, _, format in
                 // Read sample rate from stream format so coefficients match.
                 let sr = format.pointee.mSampleRate
                 let storage = MTAudioProcessingTapGetStorage(tap)
                 let s = Unmanaged<State>.fromOpaque(storage).takeUnretainedValue()
-                os_unfair_lock_lock(&s.lock)
+                os_unfair_lock_lock(s.lock)
                 s.sampleRate = sr
                 // Lazy-allocate the delay lines once we know channel count.
                 let channels = Int(format.pointee.mChannelsPerFrame)
                 s.z1 = Array(repeating: Array(repeating: 0, count: channels), count: 10)
                 s.z2 = Array(repeating: Array(repeating: 0, count: channels), count: 10)
-                os_unfair_lock_unlock(&s.lock)
+                os_unfair_lock_unlock(s.lock)
             },
             unprepare: { _ in },
             process: { tap, numberFrames, _, bufferListInOut, numberFramesOut, flagsOut in
@@ -167,8 +195,8 @@ final class EQAudioTap: ObservableObject {
 
                 let storage = MTAudioProcessingTapGetStorage(tap)
                 let s = Unmanaged<State>.fromOpaque(storage).takeUnretainedValue()
-                os_unfair_lock_lock(&s.lock)
-                defer { os_unfair_lock_unlock(&s.lock) }
+                os_unfair_lock_lock(s.lock)
+                defer { os_unfair_lock_unlock(s.lock) }
 
                 let bufferList = UnsafeMutableAudioBufferListPointer(bufferListInOut)
                 let frames = Int(numberFramesOut.pointee)

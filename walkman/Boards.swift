@@ -140,7 +140,13 @@ nonisolated struct KuwoBoardService: BoardService {
         let rawName = (d["name"] as? String) ?? "未知"
         let artist = (d["artist"] as? String) ?? ""
         let album = d["album"] as? String
-        let durationStr = (d["duration"] as? String) ?? (d["song_duration"] as? String) ?? "0"
+        // Kuwo ksong.s returns BOTH `duration` and `song_duration`. The former is some short
+        // ranking metric (typically 1~20, looks like a "days on chart" counter) — definitely
+        // not playback length. `song_duration` is the real seconds (e.g. 210, 243, 264).
+        // Previously we preferred `duration`, so rows showed "0:01" / "0:14" for tracks that
+        // actually play for 3+ minutes. Read `song_duration` first; keep `duration` as a
+        // last-ditch fallback only if the real field is missing.
+        let durationStr = (d["song_duration"] as? String) ?? (d["duration"] as? String) ?? "0"
         let duration = Int(durationStr) ?? 0
 
         var qualities: [Quality] = []

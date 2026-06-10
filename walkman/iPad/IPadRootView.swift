@@ -27,6 +27,11 @@ struct IPadRootView: View {
     @State private var showSettings = false
     @State private var showPlayer = false
 
+    // 显式持有 SettingsView 用到的 env objects,sheet/popover 上手动 .environmentObject(...)
+    // 透传 —— 跟收藏/下载弹窗一个套路,免得受 Mac 隐式继承不稳定影响。
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var sources: SourceManager
+
     private var selection: Binding<IPadDestination> {
         Binding(
             get: { decode(rawSelection) },
@@ -79,15 +84,36 @@ struct IPadRootView: View {
         .onChange(of: rawSelection) { _, _ in
             path = NavigationPath()
         }
-        // MARK: - 针对 Mac Catalyst 优化设置弹窗交互
+        // Mac 状态栏菜单 → 切到搜索 / 打开播放器 —— 见 MacStatusBarController。
+        .onReceive(NotificationCenter.default.publisher(for: .walkmanMacOpenSearch)) { _ in
+            rawSelection = "search"
+            // 如果在播放器全屏态,先收起播放器才能看到搜索界面。
+            if showPlayer {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+                    showPlayer = false
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .walkmanMacOpenPlayer)) { _ in
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+                showPlayer = true
+            }
+        }
+        // 设置弹窗 —— Mac → .popover (点外面 / Esc 关), iPad → .sheet。
+        // env objects 显式透传,跟收藏 / 下载弹窗保持一致的"安全网"风格。
         #if targetEnvironment(macCatalyst)
         .popover(isPresented: $showSettings) {
             NavigationStack { SettingsView() }
-                .frame(width: 520, height: 640) // 为 Mac 桌面端提供一个固定且精致的设置窗口尺寸
+                .environmentObject(settings)
+                .environmentObject(sources)
+                .frame(width: 520, height: 640)
         }
         #else
         .sheet(isPresented: $showSettings) {
             NavigationStack { SettingsView() }
+                .environmentObject(settings)
+                .environmentObject(sources)
+                .presentationDragIndicator(.visible)
         }
         #endif
     }

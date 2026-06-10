@@ -387,9 +387,19 @@ struct FlexLayout: Layout {
 
 struct AddToPlaylistSheet: View {
     let track: Track
+    /// 可选 close 回调,留给 .sheet(isPresented:) / .sheet(item:) 调用方在需要的时候
+    /// 显式把 binding 置 nil(主要场景:Mac Catalyst 上 dismiss 偶发失灵时的兜底)。
+    /// 默认 nil,所有原有调用点(toolbar 取消按钮直接 dismiss())继续走 SwiftUI 原生路径。
+    var onClose: (() -> Void)? = nil
     @EnvironmentObject var playlists: PlaylistStore
     @Environment(\.dismiss) var dismiss
+
     @State private var newName: String = ""
+
+    private func closeNow() {
+        onClose?()
+        dismiss()
+    }
 
     var body: some View {
         NavigationStack {
@@ -402,7 +412,7 @@ struct AddToPlaylistSheet: View {
                             guard !trimmed.isEmpty else { return }
                             let p = playlists.createPlaylist(name: trimmed)
                             playlists.addTracks([track], to: p.id)
-                            dismiss()
+                            closeNow()
                         }
                         .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
@@ -411,7 +421,7 @@ struct AddToPlaylistSheet: View {
                     ForEach(playlists.playlists) { p in
                         Button {
                             playlists.addTracks([track], to: p.id)
-                            dismiss()
+                            closeNow()
                         } label: {
                             HStack {
                                 Image(systemName: "music.note.list").foregroundColor(.accentColor)
@@ -426,8 +436,14 @@ struct AddToPlaylistSheet: View {
             .navigationTitle("收藏到歌单")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                // Mac Catalyst 上这个 sheet 走 .popover —— 点外面 / Esc 都能关,
+                // 顶栏的"取消"按钮反而是多余的(还可能误导用户)。只在 iOS 显示。
+                #if !targetEnvironment(macCatalyst)
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { closeNow() } }
+                #endif
             }
+            .toolbarBackground(.thinMaterial, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 }
