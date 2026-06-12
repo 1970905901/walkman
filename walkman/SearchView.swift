@@ -33,6 +33,7 @@ struct SearchView: View {
     @State private var resultsByScope: [SearchScope: [Track]] = [:]
     @State private var loadingScopes: Set<SearchScope> = []
     @State private var error: String?
+    @State private var showRecognize = false
     @FocusState private var searchFocused: Bool
 
     private let tabs: [SearchScope] = [
@@ -74,6 +75,12 @@ struct SearchView: View {
         .brandedSurface()
         .navigationTitle("搜索")
         .navigationBarTitleDisplayMode(.large)
+        .sheet(isPresented: $showRecognize) {
+            RecognizeView { term in
+                keyword = term
+                searchAll()
+            }
+        }
     }
 
     // MARK: - Bar
@@ -100,6 +107,15 @@ struct SearchView: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
             .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Button {
+                showRecognize = true
+            } label: {
+                Image(systemName: "shazam.logo.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(DS.Palette.brandGradient)
+            }
+            .accessibilityLabel("听歌识曲")
 
             if searchFocused || !keyword.isEmpty {
                 Button("取消") {
@@ -275,7 +291,7 @@ struct TrackRow: View {
     @ObservedObject private var downloads = DownloadStore.shared
     var body: some View {
         HStack(spacing: 12) {
-            Artwork(url: track.picURL, size: 48, radius: DS.Radius.small)
+            Artwork(url: downloads.displayCoverURL(for: track), size: 48, radius: DS.Radius.small)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(track.name).font(DS.Typography.trackTitle).lineLimit(1)
@@ -357,16 +373,20 @@ struct FlexLayout: Layout {
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, lineH: CGFloat = 0
+        var x: CGFloat = 0, y: CGFloat = 0, lineH: CGFloat = 0, usedWidth: CGFloat = 0
         for sub in subviews {
             let s = sub.sizeThatFits(.unspecified)
             if x + s.width > maxWidth, x > 0 {
                 x = 0; y += lineH + runSpacing; lineH = 0
             }
             x += s.width + spacing
+            usedWidth = max(usedWidth, x - spacing)
             lineH = max(lineH, s.height)
         }
-        return CGSize(width: maxWidth, height: y + lineH)
+        // 理想尺寸测量(proposal.width == nil/∞)时不能把 ∞ 报回去 —
+        // SwiftUI 会直接 fatal "malformed dimension",返回实际内容宽度。
+        return CGSize(width: maxWidth.isFinite ? maxWidth : usedWidth,
+                      height: y + lineH)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -455,8 +475,20 @@ struct AddToPlaylistSheet: View {
 struct TrackRowSwipe: ViewModifier {
     let track: Track
     var onRemove: (() -> Void)? = nil
+    /// 弹窗提升出口:传了这两个回调,行内不再自己弹 sheet,改由调用方在稳定的
+    /// 根 view 上呈现(Mac Catalyst 行级 sheet 在 List 行回收后 dismiss 会失灵,
+    /// 跟 IPadSearchView 修过的问题同源)。不传则保持原有行内 sheet(iPhone 搜索页)。
+    var onAddToPlaylist: ((Track) -> Void)? = nil
+    var onDownload: ((Track) -> Void)? = nil
     @State private var showAdd = false
     @State private var showDownload = false
+
+    private func requestAdd() {
+        if let onAddToPlaylist { onAddToPlaylist(track) } else { showAdd = true }
+    }
+    private func requestDownload() {
+        if let onDownload { onDownload(track) } else { showDownload = true }
+    }
 
     /// Plain "歌名 - 歌手" string used for both copy + share. Kept short so it works as a
     /// chat snippet without overflowing one line.
@@ -469,9 +501,9 @@ struct TrackRowSwipe: ViewModifier {
     func body(content: Content) -> some View {
         content
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button { showAdd = true } label: { Label("收藏", systemImage: "plus.circle") }
+                Button { requestAdd() } label: { Label("收藏", systemImage: "plus.circle") }
                     .tint(.accentColor)
-                Button { showDownload = true } label: { Label("下载", systemImage: "arrow.down.circle") }
+                Button { requestDownload() } label: { Label("下载", systemImage: "arrow.down.circle") }
                     .tint(.indigo)
                 if let onRemove {
                     Button(role: .destructive, action: onRemove) { Label("移除", systemImage: "trash") }
@@ -481,8 +513,8 @@ struct TrackRowSwipe: ViewModifier {
             // same actions) and adds copy/share + the platform link. Heavier than swipe
             // but doesn't conflict — both gestures coexist on List rows in SwiftUI.
             .contextMenu {
-                Button { showAdd = true } label: { Label("收藏", systemImage: "heart") }
-                Button { showDownload = true } label: { Label("下载", systemImage: "arrow.down.circle") }
+                Button { requestAdd() } label: { Label("收藏", systemImage: "heart") }
+                Button { requestDownload() } label: { Label("下载", systemImage: "arrow.down.circle") }
                 Divider()
                 Button {
                     UIPasteboard.general.string = shareText
@@ -505,7 +537,13 @@ struct TrackRowSwipe: ViewModifier {
 }
 
 extension View {
-    func trackRowSwipe(_ track: Track, onRemove: (() -> Void)? = nil) -> some View {
-        modifier(TrackRowSwipe(track: track, onRemove: onRemove))
+    func trackRowSwipe(
+        _ track: Track,
+        onRemove: (() -> Void)? = nil,
+        onAddToPlaylist: ((Track) -> Void)? = nil,
+        onDownload: ((Track) -> Void)? = nil
+    ) -> some View {
+        modifier(TrackRowSwipe(track: track, onRemove: onRemove,
+                               onAddToPlaylist: onAddToPlaylist, onDownload: onDownload))
     }
 }

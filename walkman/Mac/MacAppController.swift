@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import Combine
+import Intents
 import ObjectiveC.runtime
 
 // MARK: - UIApplicationDelegate
@@ -11,6 +12,15 @@ import ObjectiveC.runtime
 /// (点 Dock 图标时让窗口回来)。Catalyst runtime 会自动把 NSApplicationDelegate 的调用转发
 /// 到我们的 UIApplicationDelegate 实例上,前提是 selector 一字不差地暴露出来。
 final class WalkmanAppDelegate: NSObject, UIApplicationDelegate {
+    /// SiriKit in-app handling:"用随便听播放晴天"这类 INPlayMediaIntent 由系统
+    /// 后台拉起 app 后从这里拿 handler,不走 Intents Extension。
+    func application(_ application: UIApplication, handlerFor intent: INIntent) -> Any? {
+        if intent is INPlayMediaIntent {
+            return MainActor.assumeIsolated { SiriPlayMediaHandler() }
+        }
+        return nil
+    }
+
     #if targetEnvironment(macCatalyst)
     @objc(applicationShouldTerminateAfterLastWindowClosed:)
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: Any) -> Bool {
@@ -65,6 +75,11 @@ final class MacStatusBarController: NSObject {
     private var searchItem: NSObject?
     private var openPlayerItem: NSObject?
     private var quitItem: NSObject?
+    private var dockMenu: NSObject?
+    private var dockPlayPauseItem: NSObject?
+    private var dockPrevItem: NSObject?
+    private var dockNextItem: NSObject?
+    private var volumeSlider: NSObject?
 
     // MARK: State
     private weak var playback: PlaybackEngine?
@@ -91,6 +106,7 @@ final class MacStatusBarController: NSObject {
         self.playback = playback
         createStatusItem()
         createMenu()
+        createDockMenu()
         observePlayback()
         startScrollTimer()
         refresh(track: playback.currentTrack, isPlaying: playback.isPlaying)
@@ -157,11 +173,16 @@ final class MacStatusBarController: NSObject {
     private func createMenu() {
         guard let menuClass = Self.cls("NSMenu"),
               let m = menuClass.init() as? NSObject else { return }
+        // 默认 autoenablesItems = YES 时 AppKit 在菜单打开时按 target/action 重新
+        // 启用所有项,会盖掉我们手动设置的灰态 —— 必须关掉手动接管。
+        m.setValue(NSNumber(value: false), forKey: "autoenablesItems")
         menu = m
 
         playPauseItem  = addItem(to: m, title: "播放",     action: #selector(_playPauseTapped))
         prevItem       = addItem(to: m, title: "上一首",   action: #selector(_prevTapped))
         nextItem       = addItem(to: m, title: "下一首",   action: #selector(_nextTapped))
+        addSeparator(to: m)
+        addVolumeItem(to: m)
         addSeparator(to: m)
         searchItem     = addItem(to: m, title: "搜索",      action: #selector(_searchTapped))
         openPlayerItem = addItem(to: m, title: "打开播放器", action: #selector(_openPlayerTapped))
@@ -169,6 +190,38 @@ final class MacStatusBarController: NSObject {
         quitItem       = addItem(to: m, title: "退出 随便听", action: #selector(_quitTapped))
 
         statusItem?.setValue(m, forKey: "menu")
+    }
+
+    /// Dock 图标右键菜单 —— 跟状态栏菜单同一套播控动作(去掉"退出",Dock 自带)。
+    /// Catalyst 没有公开的 dock menu API:AppKit 侧是 NSApplicationDelegate 的
+    /// `applicationDockMenu:`,这里往 NSApp.delegate 的类上动态注入这个 selector,
+    /// 返回我们用反射搭好的 NSMenu。
+    private func createDockMenu() {
+        guard let menuClass = Self.cls("NSMenu"),
+              let m = menuClass.init() as? NSObject else { return }
+        m.setValue(NSNumber(value: false), forKey: "autoenablesItems")
+        dockMenu = m
+        dockPlayPauseItem = addItem(to: m, title: "播放",   action: #selector(_playPauseTapped))
+        dockPrevItem      = addItem(to: m, title: "上一首", action: #selector(_prevTapped))
+        dockNextItem      = addItem(to: m, title: "下一首", action: #selector(_nextTapped))
+        addSeparator(to: m)
+        addItem(to: m, title: "搜索",      action: #selector(_searchTapped))
+        addItem(to: m, title: "打开播放器", action: #selector(_openPlayerTapped))
+        installDockMenuProvider()
+    }
+
+    private func installDockMenuProvider() {
+        guard let app = nsApp(),
+              let delegate = app.value(forKey: "delegate") as? NSObject,
+              let klass = object_getClass(delegate) else { return }
+        let sel = NSSelectorFromString("applicationDockMenu:")
+        let block: @convention(block) (NSObject, NSObject) -> NSObject? = { _, _ in
+            MainActor.assumeIsolated { MacStatusBarController.shared.dockMenu }
+        }
+        let imp = imp_implementationWithBlock(block)
+        if !class_addMethod(klass, sel, imp, "@@:@") {
+            class_replaceMethod(klass, sel, imp, "@@:@")
+        }
     }
 
     @discardableResult
@@ -180,6 +233,37 @@ final class MacStatusBarController: NSObject {
         invokeSelectorSetter(on: item, setter: "setAction:", value: action, klass: itemClass)
         _ = menu.perform(NSSelectorFromString("addItem:"), with: item)
         return item
+    }
+
+    /// "音量"菜单项 —— NSMenuItem.view 塞一个 NSSlider(应用内音量,独立于系统音量)。
+    /// NSSlider 走 `sliderWithValue:minValue:maxValue:target:action:` 类方法构造,
+    /// double 参数 perform 传不了,跟 setFrame: 一样用 IMP 直调。
+    private func addVolumeItem(to menu: NSObject) {
+        guard let itemClass = Self.cls("NSMenuItem"),
+              let item = itemClass.init() as? NSObject,
+              let sliderClass = Self.cls("NSSlider"),
+              let viewClass = Self.cls("NSView"),
+              let container = viewClass.init() as? NSObject else { return }
+        let sel = NSSelectorFromString("sliderWithValue:minValue:maxValue:target:action:")
+        guard let method = class_getClassMethod(sliderClass, sel) else { return }
+        typealias MakeFn = @convention(c) (AnyClass, Selector, Double, Double, Double, NSObject?, Selector?) -> NSObject
+        let slider = unsafeBitCast(method_getImplementation(method), to: MakeFn.self)(
+            sliderClass, sel, Double(playback?.volume ?? 1), 0, 1, self, #selector(_volumeChanged(_:)))
+        setFrame(container, CGRect(x: 0, y: 0, width: 220, height: 26))
+        // 左边距 14 跟普通菜单项文字对齐
+        setFrame(slider, CGRect(x: 14, y: 3, width: 192, height: 19))
+        _ = container.perform(NSSelectorFromString("addSubview:"), with: slider)
+        volumeSlider = slider
+        item.setValue(container, forKey: "view")
+        _ = menu.perform(NSSelectorFromString("addItem:"), with: item)
+    }
+
+    private func setFrame(_ view: NSObject, _ rect: CGRect) {
+        let sel = NSSelectorFromString("setFrame:")
+        guard let cls = object_getClass(view),
+              let method = class_getInstanceMethod(cls, sel) else { return }
+        typealias Fn = @convention(c) (NSObject, Selector, CGRect) -> Void
+        unsafeBitCast(method_getImplementation(method), to: Fn.self)(view, sel, rect)
     }
 
     private func addSeparator(to menu: NSObject) {
@@ -197,6 +281,13 @@ final class MacStatusBarController: NSObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] track, playing in
                 self?.refresh(track: track, isPlaying: playing)
+            }
+            .store(in: &cancellables)
+        // 播放器页滑条改音量时,状态栏菜单里的 slider 跟着走
+        playback.$volume
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] v in
+                self?.volumeSlider?.setValue(NSNumber(value: Double(v)), forKey: "doubleValue")
             }
             .store(in: &cancellables)
     }
@@ -268,6 +359,11 @@ final class MacStatusBarController: NSObject {
         playPauseItem?.setValue(NSNumber(value: hasTrack), forKey: "enabled")
         prevItem?.setValue(NSNumber(value: hasTrack), forKey: "enabled")
         nextItem?.setValue(NSNumber(value: hasTrack), forKey: "enabled")
+        // Dock 菜单跟状态栏菜单同步文案 / 灰态
+        dockPlayPauseItem?.setValue(isPlaying ? "暂停" : "播放", forKey: "title")
+        dockPlayPauseItem?.setValue(NSNumber(value: hasTrack), forKey: "enabled")
+        dockPrevItem?.setValue(NSNumber(value: hasTrack), forKey: "enabled")
+        dockNextItem?.setValue(NSNumber(value: hasTrack), forKey: "enabled")
     }
 
     // MARK: - Window control
@@ -288,6 +384,12 @@ final class MacStatusBarController: NSObject {
 
     @objc private func _playPauseTapped() {
         playback?.togglePlayPause()
+    }
+
+    @objc private func _volumeChanged(_ sender: NSObject) {
+        if let v = sender.value(forKey: "doubleValue") as? Double {
+            playback?.volume = Float(v)
+        }
     }
 
     @objc private func _prevTapped() {

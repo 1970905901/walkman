@@ -72,7 +72,15 @@ final class PlaylistStore: ObservableObject {
             var merged = playlists
             for r in remote {
                 if let i = merged.firstIndex(where: { $0.id == r.id }) {
-                    if r.updatedAt > merged[i].updatedAt { merged[i] = r }
+                    if r.updatedAt > merged[i].updatedAt {
+                        // 本地导入的歌不上云,远端版本里必然没有 — 合并回来防丢。
+                        var newer = r
+                        for tid in merged[i].trackIDs
+                        where isLocalImport(tid) && !newer.trackIDs.contains(tid) {
+                            newer.trackIDs.append(tid)
+                        }
+                        merged[i] = newer
+                    }
                 } else if let i = merged.firstIndex(where: { $0.name == r.name }) {
                     var combined = r
                     for tid in merged[i].trackIDs where !combined.trackIDs.contains(tid) {
@@ -165,9 +173,23 @@ final class PlaylistStore: ObservableObject {
             try? data.write(to: trackBankURL, options: .atomic)
         }
         if !skipCloud {
-            CloudSync.shared.push(playlists, forKey: CloudSync.Keys.playlists)
-            CloudSync.shared.push(trackBank, forKey: CloudSync.Keys.trackBank)
+            // 本地文件夹导入的歌(lf://)的 bookmark 只在本机有效,同步到其它设备
+            // 也播不了,所以歌曲和纯本地歌单都不上云。
+            let cloudBank = trackBank.filter { !isLocalImport($0.key) }
+            let cloudPlaylists: [PlaylistMeta] = playlists.compactMap { p in
+                var copy = p
+                copy.trackIDs = p.trackIDs.filter { !isLocalImport($0) }
+                if copy.trackIDs.isEmpty && !p.trackIDs.isEmpty { return nil }
+                return copy
+            }
+            CloudSync.shared.push(cloudPlaylists, forKey: CloudSync.Keys.playlists)
+            CloudSync.shared.push(cloudBank, forKey: CloudSync.Keys.trackBank)
         }
+    }
+
+    /// 本地文件夹导入的歌(songmid 是 lf:// 引用)。
+    private func isLocalImport(_ trackID: String) -> Bool {
+        trackBank[trackID]?.songmid.hasPrefix(LocalMusicStore.scheme) ?? false
     }
 }
 
@@ -234,7 +256,10 @@ final class ScriptStore: ObservableObject {
         var author = "未知"
         var homepage = ""
         let header = String(raw.prefix(2000))
-        for line in header.split(separator: "\n") {
+        // split(whereSeparator:) instead of split(separator: "\n") — "\r\n" is a
+        // single Character in Swift, so splitting on "\n" misses CRLF line endings
+        // and glues lines together (real scripts in the wild mix CRLF/LF).
+        for line in header.split(whereSeparator: \.isNewline) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard trimmed.hasPrefix("*") || trimmed.hasPrefix("//") else { continue }
             let body = trimmed.replacingOccurrences(of: "*", with: "")
@@ -262,6 +287,20 @@ final class ScriptStore: ObservableObject {
         if let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode([UserScript].self, from: data) {
             scripts = decoded
+            // Self-heal entries imported before the CRLF parsing fix: re-derive
+            // metadata from the stored script body if the name never parsed.
+            var healed = false
+            for idx in scripts.indices where scripts[idx].name == "未命名脚本" {
+                let reparsed = Self.parseMetadata(from: scripts[idx].rawScript)
+                guard reparsed.name != "未命名脚本" else { continue }
+                scripts[idx].name = reparsed.name
+                scripts[idx].description = reparsed.description
+                scripts[idx].version = reparsed.version
+                scripts[idx].author = reparsed.author
+                scripts[idx].homepage = reparsed.homepage
+                healed = true
+            }
+            if healed { save() }
         }
     }
 

@@ -25,6 +25,7 @@ nonisolated enum AudioMetadataWriter {
     static func apply(
         to fileURL: URL,
         track: Track,
+        details: TrackDetails? = nil,
         coverData: Data?,
         coverMIME: String?,   // "image/jpeg" / "image/png" 等;nil ⇒ 当成 jpeg
         lrcText: String?
@@ -38,6 +39,7 @@ nonisolated enum AudioMetadataWriter {
                     title: track.name,
                     artist: track.singer,
                     album: track.albumName,
+                    details: details,
                     lyrics: lrcText,
                     coverData: coverData,
                     coverMIME: coverMIME ?? "image/jpeg"
@@ -48,6 +50,7 @@ nonisolated enum AudioMetadataWriter {
                     title: track.name,
                     artist: track.singer,
                     album: track.albumName,
+                    details: details,
                     lyrics: lrcText,
                     coverData: coverData,
                     coverMIME: coverMIME ?? "image/jpeg"
@@ -80,6 +83,7 @@ nonisolated enum MP3TagWriter {
         title: String,
         artist: String,
         album: String?,
+        details: TrackDetails? = nil,
         lyrics: String?,
         coverData: Data?,
         coverMIME: String
@@ -93,6 +97,7 @@ nonisolated enum MP3TagWriter {
             title: title,
             artist: artist,
             album: album,
+            details: details,
             lyrics: lyrics,
             coverData: coverData,
             coverMIME: coverMIME
@@ -122,6 +127,7 @@ nonisolated enum MP3TagWriter {
         title: String,
         artist: String,
         album: String?,
+        details: TrackDetails?,
         lyrics: String?,
         coverData: Data?,
         coverMIME: String
@@ -131,6 +137,24 @@ nonisolated enum MP3TagWriter {
         frames.append(buildTextFrame(id: "TPE1", text: artist))
         if let album = album, !album.isEmpty {
             frames.append(buildTextFrame(id: "TALB", text: album))
+        }
+        if let d = details {
+            if let n = d.trackNumber, n > 0 {
+                let trck = d.trackTotal.map { "\(n)/\($0)" } ?? "\(n)"
+                frames.append(buildTextFrame(id: "TRCK", text: trck))
+            }
+            if let aa = d.albumArtist, !aa.isEmpty {
+                frames.append(buildTextFrame(id: "TPE2", text: aa))
+            }
+            if let date = d.releaseDate, !date.isEmpty {
+                frames.append(buildTextFrame(id: "TDRC", text: date))
+            }
+            if let genre = d.genre, !genre.isEmpty {
+                frames.append(buildTextFrame(id: "TCON", text: genre))
+            }
+            if let company = d.company, !company.isEmpty {
+                frames.append(buildTextFrame(id: "TPUB", text: company))
+            }
         }
         if let lyrics = lyrics, !lyrics.isEmpty {
             frames.append(buildUSLTFrame(lyrics: lyrics))
@@ -248,6 +272,7 @@ nonisolated enum FLACTagWriter {
         title: String,
         artist: String,
         album: String?,
+        details: TrackDetails? = nil,
         lyrics: String?,
         coverData: Data?,
         coverMIME: String
@@ -297,7 +322,7 @@ nonisolated enum FLACTagWriter {
                 && $0.type != blockTypePadding
         }
         // 3) 构造新的 VORBIS_COMMENT data
-        let vcData = buildVorbisCommentData(title: title, artist: artist, album: album, lyrics: lyrics)
+        let vcData = buildVorbisCommentData(title: title, artist: artist, album: album, details: details, lyrics: lyrics)
         // 4) 构造新的 PICTURE data(可选)
         let picData: Data? = coverData.flatMap { d in
             buildPictureData(coverData: d, mime: coverMIME)
@@ -341,6 +366,7 @@ nonisolated enum FLACTagWriter {
         title: String,
         artist: String,
         album: String?,
+        details: TrackDetails?,
         lyrics: String?
     ) -> Data {
         let vendor = "walkman"
@@ -349,6 +375,14 @@ nonisolated enum FLACTagWriter {
         comments.append("ARTIST=\(artist)")
         if let album = album, !album.isEmpty {
             comments.append("ALBUM=\(album)")
+        }
+        if let d = details {
+            if let n = d.trackNumber, n > 0 { comments.append("TRACKNUMBER=\(n)") }
+            if let total = d.trackTotal, total > 0 { comments.append("TRACKTOTAL=\(total)") }
+            if let aa = d.albumArtist, !aa.isEmpty { comments.append("ALBUMARTIST=\(aa)") }
+            if let date = d.releaseDate, !date.isEmpty { comments.append("DATE=\(date)") }
+            if let genre = d.genre, !genre.isEmpty { comments.append("GENRE=\(genre)") }
+            if let company = d.company, !company.isEmpty { comments.append("ORGANIZATION=\(company)") }
         }
         if let lyrics = lyrics, !lyrics.isEmpty {
             comments.append("LYRICS=\(lyrics)")

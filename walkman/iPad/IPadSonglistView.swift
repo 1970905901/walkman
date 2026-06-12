@@ -93,14 +93,24 @@ struct IPadSonglistView: View {
         .task(id: LoadKey(source: selectedSource, order: currentOrder.id, tag: selectedTag.id, query: submittedQuery)) {
             await load()
         }
+        // 筛选弹窗 —— Mac → .popover(点外面/Esc 关,跟设置弹窗一致),iPad → .sheet。
+        #if targetEnvironment(macCatalyst)
+        .popover(isPresented: $showTagSheet) {
+            TagFilterSheet(groups: $tagGroups, isLoading: $tagsLoading, selected: selectedTag) { tag in
+                selectedTag = tag
+            }
+            .frame(width: 520, height: 640)
+        }
+        #else
         .sheet(isPresented: $showTagSheet) {
-            TagFilterSheet(groups: tagGroups, isLoading: tagsLoading, selected: selectedTag) { tag in
+            TagFilterSheet(groups: $tagGroups, isLoading: $tagsLoading, selected: selectedTag) { tag in
                 selectedTag = tag
             }
             .inheritedAppearance()
             .presentationDragIndicator(.visible)
             .presentationDetents([.large])
         }
+        #endif
     }
 
     // MARK: Header (title + source chip + search bar + order chip + filter btn)

@@ -102,6 +102,62 @@ struct PlayHistoryView: View {
     @State private var showClear = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            #if targetEnvironment(macCatalyst)
+            MacPageHeader("最近播放") {
+                if !history.tracks.isEmpty {
+                    Button { showClear = true } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(DS.Palette.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("清空播放历史")
+                }
+            }
+            .padding(.horizontal, DS.Spacing.l)
+            #endif
+            historyList
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if targetEnvironment(macCatalyst)
+        // 和资料库等 Mac 详情页保持同一背景 — brandedSurface 的底色和外层容器
+        // (IPadRootView 的 contentBackground)不同,顶部安全区会露出一条色带。
+        .background(IPad.Color.contentBackground)
+        .toolbar(.hidden, for: .navigationBar)
+        #else
+        .brandedSurface()
+        .navigationTitle("播放历史")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            if !history.tracks.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showClear = true } label: { Image(systemName: "trash") }
+                }
+            }
+        }
+        #endif
+        .overlay {
+            if history.tracks.isEmpty {
+                BrandedEmpty(icon: "clock.arrow.circlepath",
+                             title: "还没有播放记录",
+                             subtitle: "播放过的歌曲会出现在这里",
+                             topPadding: 80)
+            }
+        }
+        // confirmationDialog attached to a toolbar Button was rendering as a
+        // popover anchored to the trash icon (top-right) instead of a centered
+        // sheet — iOS 26 changed the behavior. .alert always centers + always
+        // shows both buttons, which is the experience we actually want here.
+        .alert("清空播放历史?", isPresented: $showClear) {
+            Button("取消", role: .cancel) {}
+            Button("清空", role: .destructive) { history.clear() }
+        } message: {
+            Text("清空后无法恢复")
+        }
+    }
+
+    private var historyList: some View {
         List {
             if !history.tracks.isEmpty {
                 // Section header: count + clear shortcut feel like a small toolbar
@@ -141,34 +197,5 @@ struct PlayHistoryView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .brandedSurface()
-        .navigationTitle("播放历史")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            if !history.tracks.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showClear = true } label: { Image(systemName: "trash") }
-                }
-            }
-        }
-        .overlay {
-            if history.tracks.isEmpty {
-                BrandedEmpty(icon: "clock.arrow.circlepath",
-                             title: "还没有播放记录",
-                             subtitle: "播放过的歌曲会出现在这里",
-                             topPadding: 80)
-            }
-        }
-        // confirmationDialog attached to a toolbar Button was rendering as a
-        // popover anchored to the trash icon (top-right) instead of a centered
-        // sheet — iOS 26 changed the behavior. .alert always centers + always
-        // shows both buttons, which is the experience we actually want here.
-        .alert("清空播放历史?", isPresented: $showClear) {
-            Button("取消", role: .cancel) {}
-            Button("清空", role: .destructive) { history.clear() }
-        } message: {
-            Text("清空后无法恢复")
-        }
     }
 }

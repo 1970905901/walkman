@@ -5,6 +5,7 @@ struct PlayerView: View {
     @EnvironmentObject var sources: SourceManager
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var sleepTimer: SleepTimer
+    @ObservedObject private var downloads = DownloadStore.shared
     @Environment(\.horizontalSizeClass) private var hSize
     /// Called when the user dismisses the player via the chevron, drag-down, or
     /// left-edge swipe-back. Set by RootTabView's ZStack — we're no longer a
@@ -224,7 +225,7 @@ struct PlayerView: View {
     }
 
     private func sync() {
-        artwork.extract(from: playback.currentTrack?.picURL)
+        artwork.extract(from: playback.currentTrack.flatMap { downloads.displayCoverURL(for: $0) })
         lyrics = []
         guard let track = playback.currentTrack else { return }
         loadingLyrics = true
@@ -274,6 +275,8 @@ struct PlayerView: View {
             }
             HStack {
                 Spacer()
+                AirPlayButton()
+                    .frame(width: 36, height: 36)
                 Menu {
                     Button { if let t = playback.currentTrack { trackToFavorite = t } } label: {
                         Label("收藏", systemImage: "heart")
@@ -346,7 +349,7 @@ struct PlayerView: View {
             ZStack {
                 if let track = playback.currentTrack {
                     VStack(spacing: 0) {
-                        Artwork(url: track.picURL, size: 320, radius: DS.Radius.xlarge)
+                        Artwork(url: downloads.displayCoverURL(for: track), size: 320, radius: DS.Radius.xlarge)
                             .elevation(DS.Elevation.e3(artwork.primary))
                             .shadow(color: .black.opacity(0.35), radius: 14, y: 8)
                             .scaleEffect(playback.isPlaying ? 1.0 : 0.92)

@@ -60,7 +60,8 @@ nonisolated enum BuiltInResolver {
         case .k128: return "128kmp3"
         case .k320: return "320kmp3"
         case .flac: return "2000kflac"
-        case .flac24: return "4000khires"
+        // The legacy antiserver endpoint has no atmos/master modes — hires is its ceiling.
+        case .flac24, .hires, .atmos, .atmosPlus, .master: return "4000khires"
         }
     }
 

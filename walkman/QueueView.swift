@@ -4,6 +4,7 @@ import SwiftUI
 /// Shown as a sheet from PlayerView.
 struct QueueView: View {
     @EnvironmentObject var playback: PlaybackEngine
+    @ObservedObject private var downloads = DownloadStore.shared
     @Environment(\.dismiss) var dismiss
 
     var body: some View {
@@ -84,7 +85,7 @@ struct QueueView: View {
             }
             .frame(width: 24)
 
-            Artwork(url: track.picURL, size: 38, radius: 6)
+            Artwork(url: downloads.displayCoverURL(for: track), size: 38, radius: 6)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {

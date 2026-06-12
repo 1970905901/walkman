@@ -63,13 +63,20 @@ struct ScriptManagerView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .contextMenu {
+                        Button(role: .destructive) { delete(script.id) } label: {
+                            Label("删除脚本", systemImage: "trash")
+                        }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) { delete(script.id) } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
                 }
                 .onDelete { idx in
                     let ids = idx.map { scripts.scripts[$0].id }
-                    for id in ids {
-                        sources.unload(scriptID: id)
-                        scripts.remove(id)
-                    }
+                    for id in ids { delete(id) }
                 }
             }
         }
@@ -80,7 +87,20 @@ struct ScriptManagerView: View {
                 Button { showImport = true } label: { Image(systemName: "plus") }
             }
         }
+        // 导入弹窗 —— Mac → .popover(点外面/Esc 关,跟设置弹窗一致),iOS → .sheet。
+        #if targetEnvironment(macCatalyst)
+        .popover(isPresented: $showImport) {
+            importForm
+                .frame(width: 520, height: 600)
+        }
+        #else
         .sheet(isPresented: $showImport) {
+            importForm
+        }
+        #endif
+    }
+
+    private var importForm: some View {
             NavigationStack {
                 Form {
                     Picker("方式", selection: $importMode) {
@@ -137,7 +157,11 @@ struct ScriptManagerView: View {
                     loadPickedFile(result)
                 }
             }
-        }
+    }
+
+    private func delete(_ id: UUID) {
+        sources.unload(scriptID: id)
+        scripts.remove(id)
     }
 
     /// Read the user-picked script file into `inputText` (security-scoped access required).

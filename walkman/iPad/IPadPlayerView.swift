@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - iPad / Mac full-screen player
 struct IPadPlayerView: View {
@@ -8,6 +9,9 @@ struct IPadPlayerView: View {
     @EnvironmentObject var sources: SourceManager
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var sleepTimer: SleepTimer
+    @EnvironmentObject var playlists: PlaylistStore
+    @EnvironmentObject var downloads: DownloadStore
+    @EnvironmentObject var eq: EQStore
     @StateObject private var artwork = ArtworkColors()
 
     @State private var seekValue: Double = 0
@@ -62,6 +66,35 @@ struct IPadPlayerView: View {
             extractColors()
             loadLyrics()
         }
+        // 弹窗:Mac → .popover(点外面/Esc 关,跟设置弹窗一致,env objects 显式透传),
+        // iPad → .sheet 不变。
+        #if targetEnvironment(macCatalyst)
+        .popover(isPresented: $showQueue) {
+            NavigationStack { QueueView() }
+                .environmentObject(playback)
+                .frame(width: 480, height: 640)
+        }
+        .popover(isPresented: $showEQ) {
+            NavigationStack { EQView() }
+                .environmentObject(eq)
+                .frame(width: 480, height: 640)
+        }
+        .popover(isPresented: $showSleepSheet) {
+            SleepTimerSheet()
+                .environmentObject(sleepTimer)
+                .frame(width: 420, height: 520)
+        }
+        .popover(item: $trackToFavorite) { t in
+            AddToPlaylistSheet(track: t)
+                .environmentObject(playlists)
+                .frame(width: 480, height: 560)
+        }
+        .popover(item: $trackToDownload) { t in
+            DownloadSheet(track: t)
+                .environmentObject(downloads)
+                .frame(width: 480, height: 600)
+        }
+        #else
         .sheet(isPresented: $showQueue) {
             NavigationStack { QueueView() }
                 .inheritedAppearance()
@@ -87,6 +120,7 @@ struct IPadPlayerView: View {
                 .inheritedAppearance()
                 .presentationDragIndicator(.visible)
         }
+        #endif
     }
 
     // MARK: - Top bar 动态视图适配
@@ -98,12 +132,14 @@ struct IPadPlayerView: View {
             if isMacCatalyst {
                 // 【Mac Catalyst 模式】：左侧留空，控件全部靠右，收起键在最右侧
                 Spacer()
+                airPlayButton
                 menuButton
                 closeButton
             } else {
                 // 【iPad 原生模式】：维持经典两端分布，收起键在左侧
                 closeButton
                 Spacer()
+                airPlayButton
                 menuButton
             }
         }
@@ -123,6 +159,15 @@ struct IPadPlayerView: View {
         }
         .buttonStyle(.plain)
         .help("收起")
+    }
+
+    /// AirPlay / 输出设备选择
+    private var airPlayButton: some View {
+        AirPlayButton(tint: UIColor(iconTint))
+            .frame(width: 38, height: 38)
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(Circle().strokeBorder(iconBorder, lineWidth: 0.5))
+            .help("AirPlay")
     }
 
     /// 更多菜单按钮
@@ -166,7 +211,7 @@ struct IPadPlayerView: View {
                 ZStack {
                     if let track = playback.currentTrack {
                         IPadVinylDisc(
-                            imageURL: track.picURL,
+                            imageURL: downloads.displayCoverURL(for: track),
                             isPlaying: playback.isPlaying,
                             vinylTint: saturatedTint(artwork.primary),
                             size: discSize,
@@ -363,7 +408,8 @@ struct IPadPlayerView: View {
 
     // MARK: - Helpers
     private func extractColors() {
-        guard let pic = playback.currentTrack?.picURL else { return }
+        guard let track = playback.currentTrack,
+              let pic = downloads.displayCoverURL(for: track) else { return }
         artwork.extract(from: pic)
     }
 

@@ -87,6 +87,21 @@ struct MvPlayerView: View {
         .statusBar(hidden: !controlsVisible)
         .onAppear { startup() }
         .onDisappear { teardown() }
+        // MV 队列 —— Mac → .popover(点外面/Esc 关,跟设置弹窗一致),iOS → .sheet。
+        #if targetEnvironment(macCatalyst)
+        .popover(isPresented: $showQueueSheet) {
+            MvQueueSheet(
+                queue: mvQueue,
+                currentTrackID: track.id,
+                onSelect: { selected in
+                    showQueueSheet = false
+                    loadMV(for: selected)
+                }
+            )
+            .preferredColorScheme(.dark)
+            .frame(width: 440, height: 600)
+        }
+        #else
         .sheet(isPresented: $showQueueSheet) {
             MvQueueSheet(
                 queue: mvQueue,
@@ -100,6 +115,7 @@ struct MvPlayerView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        #endif
         .overlay(alignment: .top) {
             if let errorMessage {
                 Text(errorMessage)
@@ -488,6 +504,7 @@ private struct MvQueueSheet: View {
     let queue: [Track]
     let currentTrackID: String
     let onSelect: (Track) -> Void
+    @ObservedObject private var downloads = DownloadStore.shared
 
     var body: some View {
         NavigationStack {
@@ -502,7 +519,7 @@ private struct MvQueueSheet: View {
                                     .font(.system(size: 12, weight: .medium, design: .rounded))
                                     .foregroundStyle(.white.opacity(0.45))
                                     .frame(width: 22)
-                                Artwork(url: t.picURL, size: 38, radius: 6)
+                                Artwork(url: downloads.displayCoverURL(for: t), size: 38, radius: 6)
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
                                         Text(t.name)

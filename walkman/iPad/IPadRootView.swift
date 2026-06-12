@@ -24,6 +24,9 @@ struct IPadRootView: View {
 
     @AppStorage("ipad.selection") private var rawSelection: String = "home"
     @State private var path = NavigationPath()
+    /// 搜索页状态放在 root 持有 —— currentRoot 的 switch 切页会重建 IPadSearchView,
+    /// 不提出来的话关键词和结果切走就丢(Mac / iPad 都受影响)。
+    @StateObject private var searchSession = IPadSearchSession()
     @State private var showSettings = false
     @State private var showPlayer = false
 
@@ -79,6 +82,7 @@ struct IPadRootView: View {
             }
         }
         .background(IPad.Color.contentBackground)
+        .environmentObject(searchSession)
         // Reset push stack when the user picks a different sidebar entry
         // (going from "排行榜" to "歌单" shouldn't keep a 排行榜 detail pushed).
         .onChange(of: rawSelection) { _, _ in

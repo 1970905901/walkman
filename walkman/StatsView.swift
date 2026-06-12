@@ -11,10 +11,14 @@ import Charts
 struct StatsView: View {
     @EnvironmentObject var history: PlayHistoryStore
     @EnvironmentObject var playback: PlaybackEngine
+    @ObservedObject private var downloads = DownloadStore.shared
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.Spacing.l) {
+                #if targetEnvironment(macCatalyst)
+                MacPageHeader("听歌报告")
+                #endif
                 heroCard
                 topPlayedSection
                 sourcePieSection
@@ -24,9 +28,16 @@ struct StatsView: View {
             .padding(.bottom, DS.Spacing.xxl)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if targetEnvironment(macCatalyst)
+        // 和资料库等 Mac 详情页保持同一背景 — brandedSurface 的底色和外层容器
+        // (IPadRootView 的 contentBackground)不同,顶部安全区会露出一条色带。
+        .background(IPad.Color.contentBackground)
+        .toolbar(.hidden, for: .navigationBar)
+        #else
         .brandedSurface()
         .navigationTitle("听歌报告")
         .navigationBarTitleDisplayMode(.large)
+        #endif
         .overlay {
             if history.events.isEmpty {
                 BrandedEmpty(icon: "chart.bar.xaxis",
@@ -147,7 +158,7 @@ struct StatsView: View {
                                      ? AnyShapeStyle(DS.Palette.brandGradient)
                                      : AnyShapeStyle(DS.Palette.textTertiary))
                     .frame(width: 20, alignment: .center)
-                Artwork(url: track.picURL, size: 36, radius: DS.Radius.small)
+                Artwork(url: downloads.displayCoverURL(for: track), size: 36, radius: DS.Radius.small)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.name)
                         .font(.system(size: 14, weight: .semibold))

@@ -162,6 +162,9 @@ struct SettingsView: View {
         case .k320: return "waveform.badge.plus"
         case .flac: return "waveform.path.ecg"
         case .flac24: return "waveform.path.ecg.rectangle"
+        case .hires: return "sparkles.rectangle.stack"
+        case .atmos, .atmosPlus: return "spatial.audio"
+        case .master: return "crown"
         }
     }
 

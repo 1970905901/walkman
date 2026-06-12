@@ -210,12 +210,14 @@ final class SourceManager: ObservableObject {
     nonisolated static func pickPlayQuality(preferred: Quality,
                                              trackQualities: Set<Quality>,
                                              scriptQualities: Set<Quality>) -> Quality {
-        let tryList: [Quality] = [.flac24, .flac, .k320]
+        let tryList: [Quality] = Array(Quality.ranked.dropLast())  // everything above 128k
         guard let startIdx = tryList.firstIndex(of: preferred) else {
             return .k128
         }
         for q in tryList[startIdx...] {
-            if trackQualities.contains(q) && scriptQualities.contains(q) {
+            // Extended tiers (hires/atmos/master): official metadata rarely lists them,
+            // so script support alone is enough — failures fall through the cascade.
+            if (trackQualities.contains(q) || q.isExtendedTier) && scriptQualities.contains(q) {
                 return q
             }
         }
@@ -229,13 +231,16 @@ final class SourceManager: ObservableObject {
     nonisolated static func qualityCascade(from first: Quality,
                                             trackQualities: Set<Quality>,
                                             scriptQualities: Set<Quality>) -> [Quality] {
-        let full: [Quality] = [.flac24, .flac, .k320, .k128]
+        let full: [Quality] = Quality.ranked
         guard let startIdx = full.firstIndex(of: first) else { return [first] }
         var out: [Quality] = []
         for q in full[startIdx...] {
             // k128 is the universal floor — try it even if not in scriptQualities since
             // the bundled lx backend always carries 128k for the supported sources.
-            if q == .k128 || (trackQualities.contains(q) && scriptQualities.contains(q)) {
+            // `first` is always included (it's the already-picked starting point), and
+            // extended tiers only need script support (see pickPlayQuality).
+            if q == first || q == .k128
+                || ((trackQualities.contains(q) || q.isExtendedTier) && scriptQualities.contains(q)) {
                 out.append(q)
             }
         }
@@ -281,7 +286,7 @@ final class SourceManager: ObservableObject {
         var types: [[String: String]] = []
         var _types: [String: [String: String]] = [:]
         // Officially the order is highest → lowest; the script iterates the array.
-        let ordered: [Quality] = [.flac24, .flac, .k320, .k128].filter { track.qualities.contains($0) }
+        let ordered: [Quality] = Quality.ranked.filter { track.qualities.contains($0) }
         for q in ordered {
             types.append(["type": q.rawValue, "size": ""])
             _types[q.rawValue] = ["size": ""]

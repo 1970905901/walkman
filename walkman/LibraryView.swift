@@ -10,6 +10,7 @@ struct LibraryView: View {
     @EnvironmentObject var downloads: DownloadStore
     @EnvironmentObject var history: PlayHistoryStore
     @State private var showCreate = false
+    @State private var showImport = false
     @State private var newName = ""
 
     // `adaptive(minimum: 170)` → iPhone shows 2 columns (390 px wide), iPad 3
@@ -98,7 +99,14 @@ struct LibraryView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { showCreate = true } label: {
+                Menu {
+                    Button { showCreate = true } label: {
+                        Label("创建歌单", systemImage: "plus.square.on.square")
+                    }
+                    Button { showImport = true } label: {
+                        Label("本地导入", systemImage: "folder.badge.plus")
+                    }
+                } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 22))
                         .foregroundStyle(DS.Palette.brandGradient)
@@ -120,6 +128,9 @@ struct LibraryView: View {
                 if !n.isEmpty { _ = playlists.createPlaylist(name: n) }
                 newName = ""
             }
+        }
+        .sheet(isPresented: $showImport) {
+            LocalImportSheet()
         }
     }
 
@@ -198,9 +209,10 @@ private struct LibraryShortcutCard: View {
 private struct PlaylistCard: View {
     let playlist: PlaylistMeta
     let tracks: [Track]
+    @ObservedObject private var downloads = DownloadStore.shared
 
     private var coverURLs: [String?] {
-        Array(tracks.prefix(4).map { $0.picURL })
+        tracks.prefix(4).map { downloads.displayCoverURL(for: $0) }
     }
 
     var body: some View {
@@ -280,7 +292,11 @@ struct PlaylistDetailView: View {
     let playlistID: UUID
     @EnvironmentObject var playlists: PlaylistStore
     @EnvironmentObject var playback: PlaybackEngine
+    @EnvironmentObject var downloads: DownloadStore
     @StateObject private var artwork = ArtworkColors()
+    // 弹窗状态在根 view —— 见 SonglistDetailView 同位置注释(Mac 行级 sheet 问题)。
+    @State private var trackToFavorite: Track?
+    @State private var trackToDownload: Track?
 
     private var playlist: PlaylistMeta? {
         playlists.playlists.first(where: { $0.id == playlistID })
@@ -316,7 +332,10 @@ struct PlaylistDetailView: View {
                         }
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .trackRowSwipe(t, onRemove: { playlists.remove(trackIDs: [t.id], from: p.id) })
+                        .trackRowSwipe(t,
+                                       onRemove: { playlists.remove(trackIDs: [t.id], from: p.id) },
+                                       onAddToPlaylist: { trackToFavorite = $0 },
+                                       onDownload: { trackToDownload = $0 })
                     }
                 } header: {
                     Text("曲目")
@@ -348,11 +367,35 @@ struct PlaylistDetailView: View {
             .navigationTitle(p.name)
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                artwork.extract(from: tracks.first?.picURL)
+                artwork.extract(from: tracks.first.flatMap { downloads.displayCoverURL(for: $0) })
             }
             .onChange(of: tracks.first?.id) { _, _ in
-                artwork.extract(from: tracks.first?.picURL)
+                artwork.extract(from: tracks.first.flatMap { downloads.displayCoverURL(for: $0) })
             }
+            // 收藏/下载弹窗 —— Mac → .popover,iPad/iPhone → .sheet(同 SonglistDetailView)。
+            #if targetEnvironment(macCatalyst)
+            .popover(item: $trackToFavorite) { t in
+                AddToPlaylistSheet(track: t)
+                    .environmentObject(playlists)
+                    .frame(width: 480, height: 560)
+            }
+            .popover(item: $trackToDownload) { t in
+                DownloadSheet(track: t)
+                    .environmentObject(downloads)
+                    .frame(width: 480, height: 600)
+            }
+            #else
+            .sheet(item: $trackToFavorite) { t in
+                AddToPlaylistSheet(track: t)
+                    .environmentObject(playlists)
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(item: $trackToDownload) { t in
+                DownloadSheet(track: t)
+                    .environmentObject(downloads)
+                    .presentationDragIndicator(.visible)
+            }
+            #endif
         } else {
             ContentUnavailableView("歌单不存在", systemImage: "trash")
         }
@@ -361,7 +404,7 @@ struct PlaylistDetailView: View {
     @ViewBuilder
     private func header(name: String) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            CoverMosaicCompact(urls: tracks.prefix(4).map { $0.picURL })
+            CoverMosaicCompact(urls: tracks.prefix(4).map { downloads.displayCoverURL(for: $0) })
                 .frame(width: 110, height: 110)
                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
                 .elevation(DS.Elevation.e2(artwork.primary))

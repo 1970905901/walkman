@@ -250,6 +250,7 @@ struct IPadTrackRow: View {
     /// user playlist row. nil for read-only sources like search/leaderboard.
     var onRemove: (() -> Void)? = nil
     @State private var hovering = false
+    @ObservedObject private var downloads = DownloadStore.shared
 
     private var shareText: String {
         var s = track.name
@@ -273,7 +274,7 @@ struct IPadTrackRow: View {
             }
             .frame(width: 32, alignment: .center)
 
-            Artwork(url: track.picURL, size: IPad.Layout.listArtworkSize, radius: 8)
+            Artwork(url: downloads.displayCoverURL(for: track), size: IPad.Layout.listArtworkSize, radius: 8)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {

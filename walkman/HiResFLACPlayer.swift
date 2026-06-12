@@ -19,14 +19,14 @@ final class HiResFLACPlayer {
 
     enum PlayerError: LocalizedError {
         case network(Error)
-        case notFLAC
+        case notFLAC(formatHint: String)
         case decoderInitFailed(String)
         case engineStartFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .network(let e): return "网络错误: \(e.localizedDescription)"
-            case .notFLAC: return "不是可解码的 FLAC 流"
+            case .notFLAC(let hint): return "不是可解码的 FLAC 流(\(hint))"
             case .decoderInitFailed(let s): return "FLAC 解码器初始化失败: \(s)"
             case .engineStartFailed(let s): return "音频引擎启动失败: \(s)"
             }
@@ -37,6 +37,11 @@ final class HiResFLACPlayer {
     private(set) var isPlaying: Bool = false
     var onPlaybackEnded: (() -> Void)?
 
+    /// 应用内独立音量(0…1)。pipeline 每首歌重建,所以记在这里,play 时再带过去。
+    var volume: Float = 1 {
+        didSet { pipeline?.volume = volume }
+    }
+
     var currentTime: Double { pipeline?.currentTime ?? 0 }
     var duration: Double { pipeline?.duration ?? 0 }
 
@@ -46,6 +51,7 @@ final class HiResFLACPlayer {
     func play(url: URL) async throws {
         stop()
         let pipe = FLACStreamPipeline()
+        pipe.volume = volume
         self.pipeline = pipe
         pipe.onEnded = { [weak self] in
             Task { @MainActor in
@@ -93,6 +99,11 @@ final class FLACStreamPipeline: NSObject, @unchecked Sendable {
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+
+    var volume: Float {
+        get { engine.mainMixerNode.outputVolume }
+        set { engine.mainMixerNode.outputVolume = newValue }
+    }
     private let lock = NSLock()
     private let bytes = StreamingByteBuffer()
 
@@ -114,7 +125,9 @@ final class FLACStreamPipeline: NSObject, @unchecked Sendable {
     private var scheduledFrames = 0  // frames already handed to the player node
 
     private var baseFrame = 0        // store-frame at the player's sampleTime 0 (shifts on seek)
+    private var lastKnownFrame = 0   // last valid progress reading — survives engine stops (interruptions)
     private var downloadedBytes = 0  // diagnostics: total bytes received from the network
+    private var headMagic = Data()   // first 16 bytes of the stream — identifies non-FLAC payloads
     private var generation = 0       // bumped on seek/stop to invalidate stale completion handlers
     private var started = false      // engine running + first buffer scheduled
     private var producingDone = false// decode loop finished (EOF reached)
@@ -175,7 +188,13 @@ final class FLACStreamPipeline: NSObject, @unchecked Sendable {
     }
 
     func resume() {
-        if !engine.isRunning { try? engine.start() }
+        if !engine.isRunning {
+            // 中断(电话/Siri)停掉引擎时,player node 上已调度的缓冲被清空,时间轴也归零 ——
+            // 直接 play() 会无声。从最后已知进度重新调度(seek 会重建 chunk 并重启引擎)。
+            let t = currentTime
+            seek(to: t)
+            return
+        }
         player.play()
     }
 
@@ -187,6 +206,7 @@ final class FLACStreamPipeline: NSObject, @unchecked Sendable {
         let gen = generation
         let avail = decodedFrames - target
         baseFrame = target
+        lastKnownFrame = target
         scheduledFrames = decodedFrames
         let snapshotChannels = channels
         // Build a contiguous buffer for [target, decodedFrames) from the store.
@@ -219,12 +239,15 @@ final class FLACStreamPipeline: NSObject, @unchecked Sendable {
     // MARK: Progress
 
     var currentTime: Double {
-        lock.lock(); let base = baseFrame; let sr = sampleRate; lock.unlock()
+        lock.lock(); let base = baseFrame; let sr = sampleRate; let known = lastKnownFrame; lock.unlock()
         guard sr > 0 else { return 0 }
-        var frame = base
+        // 引擎被中断(电话/Siri)停掉后 lastRenderTime 变 nil —— 此时退回最后一次
+        // 有效读数,而不是 baseFrame(那会把进度跳回上次 seek 的位置)。
+        var frame = known
         if let nodeTime = player.lastRenderTime,
            let pt = player.playerTime(forNodeTime: nodeTime) {
             frame = base + Int(pt.sampleTime)
+            lock.lock(); lastKnownFrame = frame; lock.unlock()
         }
         return max(0, Double(frame) / sr)
     }
@@ -275,6 +298,7 @@ final class FLACStreamPipeline: NSObject, @unchecked Sendable {
         let gen = generation
         let total = totalSamples
         let dl = downloadedBytes
+        let head = headMagic
         lock.unlock()
         print("[HiResFLAC] decode loop ended: ok=\(processOK) state=\(endState.rawValue) decodedFrames=\(endFrame) totalSamples=\(total) downloaded=\(dl)B started=\(didStart) aborted=\(wasAborted)")
 
@@ -282,7 +306,10 @@ final class FLACStreamPipeline: NSObject, @unchecked Sendable {
             if let netErr {
                 finishReady(.failure(HiResFLACPlayer.PlayerError.network(netErr)))
             } else {
-                finishReady(.failure(HiResFLACPlayer.PlayerError.notFLAC))
+                let hint = Self.formatHint(head: head)
+                let hex = head.map { String(format: "%02X", $0) }.joined(separator: " ")
+                print("[HiResFLAC] stream is not FLAC — head: [\(hex)] guess: \(hint)")
+                finishReady(.failure(HiResFLACPlayer.PlayerError.notFLAC(formatHint: hint)))
             }
             return
         }
@@ -292,6 +319,23 @@ final class FLACStreamPipeline: NSObject, @unchecked Sendable {
         // final completion fired before producingDone was set), end now; otherwise the last
         // buffer's dataPlayedBack completion will. Either way checkEnd judges by real play position.
         checkEnd(generation: gen)
+    }
+
+    /// Identify what the server actually sent when it isn't FLAC, from the stream's magic bytes.
+    static func formatHint(head: Data) -> String {
+        func has(_ s: String) -> Bool { head.starts(with: Array(s.utf8)) }
+        if head.isEmpty { return "空响应" }
+        if has("fLaC") { return "FLAC 但数据损坏" }
+        if has("MAC ") { return "APE 格式" }
+        if has("ID3") || (head.count >= 2 && head[0] == 0xFF && (head[1] & 0xE0) == 0xE0) { return "MP3 格式" }
+        if has("OggS") { return "OGG 格式" }
+        if has("RIFF") { return "WAV 格式" }
+        if has("FRM8") || has("DSD ") { return "DSD 格式" }
+        if head.dropFirst(4).starts(with: Array("ftyp".utf8)) { return "MP4/M4A 格式" }
+        if has("yeelion") { return "酷我加密格式 kwm" }
+        if has("{") || has("<") { return "接口返回了文本/错误页" }
+        let hex = head.prefix(4).map { String(format: "%02X", $0) }.joined()
+        return "未知格式 0x\(hex)"
     }
 
     // Called from libFLAC read callback (decode thread). Returns CONTINUE / END_OF_STREAM / ABORT.
@@ -465,7 +509,10 @@ final class FLACStreamPipeline: NSObject, @unchecked Sendable {
 
 extension FLACStreamPipeline: URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        lock.lock(); downloadedBytes += data.count; lock.unlock()
+        lock.lock()
+        downloadedBytes += data.count
+        if headMagic.count < 16 { headMagic.append(data.prefix(16 - headMagic.count)) }
+        lock.unlock()
         bytes.append(data)
     }
 

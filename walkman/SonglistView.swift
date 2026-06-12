@@ -104,7 +104,7 @@ struct SonglistView: View {
             await load()
         }
         .sheet(isPresented: $showTagSheet) {
-            TagFilterSheet(groups: tagGroups, isLoading: tagsLoading, selected: selectedTag) { tag in
+            TagFilterSheet(groups: $tagGroups, isLoading: $tagsLoading, selected: selectedTag) { tag in
                 selectedTag = tag
             }
             .presentationDetents([.medium, .large])
@@ -206,9 +206,11 @@ struct SonglistView: View {
 }
 
 /// Filter sheet: 全部 + per-platform tag groups as wrapping chips.
+/// groups/isLoading 用 Binding —— Mac Catalyst 的 popover 内容闭包弹出后
+/// 不会因外部 @State 变化重新求值,普通值传进来会永远卡在"加载中"。
 struct TagFilterSheet: View {
-    let groups: [SonglistTagGroup]
-    let isLoading: Bool
+    @Binding var groups: [SonglistTagGroup]
+    @Binding var isLoading: Bool
     let selected: SonglistTag
     let onSelect: (SonglistTag) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -240,9 +242,12 @@ struct TagFilterSheet: View {
             }
             .navigationTitle("筛选")
             .navigationBarTitleDisplayMode(.inline)
+            // Mac 上是 popover,点外部即可关闭,不需要取消按钮。
+            #if !targetEnvironment(macCatalyst)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
             }
+            #endif
         }
     }
 
@@ -317,10 +322,16 @@ private struct SonglistCard: View {
 struct SonglistDetailView: View {
     let info: SonglistInfo
     @EnvironmentObject var playback: PlaybackEngine
+    @EnvironmentObject var playlists: PlaylistStore
+    @EnvironmentObject var downloads: DownloadStore
     @StateObject private var artwork = ArtworkColors()
     @State private var detail: SonglistDetail?
     @State private var isLoading = false
     @State private var error: String?
+    // 收藏/下载弹窗状态提到根 view —— 行级 sheet 在 Mac Catalyst 上行被回收后
+    // dismiss 会失灵(点外面也关不掉),跟 IPadSearchView 同一个修法。
+    @State private var trackToFavorite: Track?
+    @State private var trackToDownload: Track?
 
     var body: some View {
         Group {
@@ -347,7 +358,9 @@ struct SonglistDetailView: View {
                             }
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
-                            .trackRowSwipe(t)
+                            .trackRowSwipe(t,
+                                           onAddToPlaylist: { trackToFavorite = $0 },
+                                           onDownload: { trackToDownload = $0 })
                         }
                     }
                 }
@@ -382,6 +395,31 @@ struct SonglistDetailView: View {
         )
         .navigationTitle(detail?.info.name ?? info.name)
         .navigationBarTitleDisplayMode(.inline)
+        // 收藏/下载弹窗 —— Mac → .popover(点外面/Esc 关),iPad/iPhone → .sheet。
+        // 跟 IPadRootView 设置弹窗同一套模式,env objects 显式透传。
+        #if targetEnvironment(macCatalyst)
+        .popover(item: $trackToFavorite) { t in
+            AddToPlaylistSheet(track: t)
+                .environmentObject(playlists)
+                .frame(width: 480, height: 560)
+        }
+        .popover(item: $trackToDownload) { t in
+            DownloadSheet(track: t)
+                .environmentObject(downloads)
+                .frame(width: 480, height: 600)
+        }
+        #else
+        .sheet(item: $trackToFavorite) { t in
+            AddToPlaylistSheet(track: t)
+                .environmentObject(playlists)
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $trackToDownload) { t in
+            DownloadSheet(track: t)
+                .environmentObject(downloads)
+                .presentationDragIndicator(.visible)
+        }
+        #endif
         .task {
             guard detail == nil, !isLoading else { return }
             isLoading = true

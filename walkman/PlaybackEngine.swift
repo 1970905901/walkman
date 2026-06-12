@@ -28,6 +28,17 @@ final class PlaybackEngine: ObservableObject {
     @Published var cascadeNotice: String?  // soft notice when AVPlayer rejected a quality and we auto-downgraded
     @Published private(set) var currentOrigin: ResolveOrigin?  // which mechanism produced the playing URL
     @Published private(set) var currentQuality: Quality?  // actual quality of the playing URL (after cascade)
+    /// 应用内独立音量(0…1),与系统音量无关。目前只有 Mac 暴露 UI;iPhone/iPad
+    /// 不出 UI、默认 1,行为与从前完全一致。两条播放链路(AVPlayer / libFLAC)都吃它。
+    @Published var volume: Float = UserDefaults.standard.object(forKey: "playback.volume") as? Float ?? 1 {
+        didSet {
+            let v = min(max(volume, 0), 1)
+            if v != volume { volume = v; return }
+            player?.volume = v
+            hiResPlayer.volume = v
+            UserDefaults.standard.set(v, forKey: "playback.volume")
+        }
+    }
 
     enum LoopMode: String, CaseIterable {
         case off, all, one
@@ -84,6 +95,7 @@ final class PlaybackEngine: ObservableObject {
     /// changes like unplugging CarPlay/headphones). Live for the engine's whole lifetime.
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
+    private var foregroundObserver: NSObjectProtocol?
     /// Whether we were playing when an interruption began, so we know to auto-resume after it ends.
     private var wasPlayingBeforeInterruption = false
     /// Where the last session (queue + position) is persisted so we can restore on next launch.
@@ -101,10 +113,15 @@ final class PlaybackEngine: ObservableObject {
     /// Called when a track actually begins playing. Used by the app to record play history.
     var onTrackPlayed: ((Track) -> Void)?
 
+    /// 已下载歌曲的本地封面文件(AppServices 注入 DownloadStore.embeddedCoverURL)。
+    /// 锁屏 / Now Playing 封面优先走它,离线也能显示。
+    var localArtworkProvider: ((Track) -> URL?)?
+
     init() {
         configureAudioSession()
         setupRemoteCommands()
         setupAudioSessionObservers()
+        hiResPlayer.volume = volume
     }
 
     func setURLResolver(_ resolver: @escaping (Track) async throws -> ResolvedTrack) {
@@ -186,6 +203,18 @@ final class PlaybackEngine: ObservableObject {
                 self?.handleInterruption(type: type, shouldResume: shouldResume)
             }
         }
+        // 兜底:通话期间 App 往往被系统挂起,挂起的 App 收不到 .ended 中断通知(Apple 文档
+        // 明确说 begin 不保证有配对的 end)。回前台时发现还欠一次恢复就主动续播。
+        foregroundObserver = nc.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.wasPlayingBeforeInterruption, !self.isPlaying else { return }
+                self.wasPlayingBeforeInterruption = false
+                try? AVAudioSession.sharedInstance().setActive(true)
+                self.resume()
+            }
+        }
         // Route changes: CarPlay / headphones / Bluetooth connected or disconnected.
         routeChangeObserver = nc.addObserver(
             forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
@@ -265,8 +294,16 @@ final class PlaybackEngine: ObservableObject {
             // A pending restore-seek only applies to the song we restored; a different song
             // means the user moved on, so drop it.
             pendingRestorePosition = nil
+        } else if let q = currentQuality {
+            // Same track re-resolving (quality cascade): record the quality that just failed.
+            // Must stay in the else-branch — on a song switch currentQuality still holds the
+            // *previous* song's quality, and inserting it here used to block the new song's
+            // cascade from ever reaching that quality.
+            triedQualities.insert(q)
+            // Each quality level gets its own libFLAC attempt — a lower-quality URL is a
+            // different stream that may well be decodable even if the hires one wasn't.
+            triedHiRes = false
         }
-        if let q = currentQuality { triedQualities.insert(q) }
         currentTrack = track
         currentOrigin = nil
         currentQuality = nil
@@ -274,7 +311,8 @@ final class PlaybackEngine: ObservableObject {
         lastError = nil
         do {
             let url: URL
-            if track.source == .local, let directURL = URL(string: track.songmid) {
+            if track.source == .local, !track.songmid.hasPrefix(LocalMusicStore.scheme),
+               let directURL = URL(string: track.songmid) {
                 url = directURL
                 currentOrigin = .localFile
             } else if let resolver = resolveURLHandler {
@@ -314,6 +352,7 @@ final class PlaybackEngine: ObservableObject {
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         p.automaticallyWaitsToMinimizeStalling = true
+        p.volume = volume
         self.player = p
 
         // One MTAudioProcessingTap per playback session — handles both EQ
@@ -364,8 +403,9 @@ final class PlaybackEngine: ObservableObject {
                     // Cascade down to a lower quality and re-resolve — only meaningful for script
                     // sources (direct/local URLs have no resolver or alternate qualities).
                     if isFormatErr, let track = self.currentTrack, track.source != .local,
-                       let nextQ = self.nextLowerQuality(below: self.currentQuality ?? .flac24, supportedBy: track),
-                       !self.triedQualities.contains(nextQ) {
+                       let nextQ = self.nextLowerQuality(below: self.currentQuality ?? .flac24,
+                                                         supportedBy: track,
+                                                         excluding: self.triedQualities) {
                         let fromQ = self.currentQuality?.displayName ?? "Hi-Res"
                         print("[PlaybackEngine] format not supported at \(self.currentQuality?.rawValue ?? "?"), retrying at \(nextQ.rawValue)")
                         self.qualityCap = nextQ
@@ -498,8 +538,9 @@ final class PlaybackEngine: ObservableObject {
             // (e.g. 贴 URL 播放) has no resolver and isn't in the queue, so loadAndPlayCurrent
             // can't re-fetch it; just surface the error.
             if let track = currentTrack, track.source != .local,
-               let nextQ = nextLowerQuality(below: currentQuality ?? .flac24, supportedBy: track),
-               !triedQualities.contains(nextQ) {
+               let nextQ = nextLowerQuality(below: currentQuality ?? .flac24,
+                                            supportedBy: track,
+                                            excluding: triedQualities) {
                 qualityCap = nextQ
                 cascadeNotice = "Hi-Res 解码失败,已降级到 \(nextQ.displayName)"
                 await loadAndPlayCurrent()
@@ -550,6 +591,14 @@ final class PlaybackEngine: ObservableObject {
         }
         if currentTrack == nil, !queue.isEmpty {
             queueIndex = max(0, min(queueIndex, queue.count - 1))
+            Task { await loadAndPlayCurrent() }
+            return
+        }
+        // 长时间中断(电话)后网络流的 CDN URL 可能已过期,item 进入 .failed —— 对它
+        // play() 没有任何效果。重新解析同一首,并记住进度,readyToPlay 时 seek 回去,
+        // 而不是让用户重新点歌从头播。
+        if !usingHiRes, let item = player?.currentItem, item.status == .failed {
+            if currentTime > 1 { pendingRestorePosition = currentTime }
             Task { await loadAndPlayCurrent() }
             return
         }
@@ -693,10 +742,16 @@ final class PlaybackEngine: ObservableObject {
 
     private func loadArtwork() {
         currentArtwork = nil
-        guard let urlStr = currentTrack?.picURL, let url = URL(string: urlStr) else { return }
+        guard let track = currentTrack else { return }
+        // 已下载的歌:封面读本地缓存(文件内嵌封面提取的),离线可用;否则走网络 picURL。
+        let localURL = localArtworkProvider?(track)
+        let remoteURL = track.picURL.flatMap(URL.init(string:))
+        guard localURL != nil || remoteURL != nil else { return }
         Task.detached { [weak self] in
-            guard let data = try? Data(contentsOf: url),
-                  let img = UIImage(data: data) else { return }
+            var img: UIImage?
+            if let localURL, let data = try? Data(contentsOf: localURL) { img = UIImage(data: data) }
+            if img == nil, let remoteURL, let data = try? Data(contentsOf: remoteURL) { img = UIImage(data: data) }
+            guard let img else { return }
             await MainActor.run { [weak self] in
                 self?.currentArtwork = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
                 self?.updateNowPlayingInfo()
@@ -799,16 +854,15 @@ final class PlaybackEngine: ObservableObject {
         loadLyricsForNowPlaying()
     }
 
-    /// Cascade: flac24bit → flac → 320k → 128k. Returns next quality below `current` that
-    /// the track lists; if none listed, returns the next cascade entry anyway (the resolver
-    /// will try and either succeed or trigger another retry).
-    nonisolated func nextLowerQuality(below current: Quality, supportedBy track: Track) -> Quality? {
-        let cascade: [Quality] = [.flac24, .flac, .k320, .k128]
+    /// Cascade: master → … → flac24bit → flac → 320k → 128k. Returns next quality below
+    /// `current` that the track lists and that isn't in `excluding`; if none listed, returns
+    /// the next untried cascade entry anyway (the resolver will try and either succeed or retry).
+    nonisolated func nextLowerQuality(below current: Quality, supportedBy track: Track,
+                                      excluding tried: Set<Quality> = []) -> Quality? {
+        let cascade: [Quality] = Quality.ranked
         guard let idx = cascade.firstIndex(of: current), idx + 1 < cascade.count else { return nil }
-        for q in cascade[(idx + 1)...] where track.qualities.contains(q) {
-            return q
-        }
-        return cascade.dropFirst(idx + 1).first
+        let candidates = cascade[(idx + 1)...].filter { !tried.contains($0) }
+        return candidates.first { track.qualities.contains($0) } ?? candidates.first
     }
 }
 

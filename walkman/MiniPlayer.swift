@@ -2,12 +2,13 @@ import SwiftUI
 
 struct MiniPlayer: View {
     @EnvironmentObject var playback: PlaybackEngine
+    @ObservedObject private var downloads = DownloadStore.shared
     var onTap: () -> Void
 
     var body: some View {
         if let track = playback.currentTrack {
             HStack(spacing: 10) {
-                Artwork(url: track.picURL, size: 42, radius: DS.Radius.small)
+                Artwork(url: downloads.displayCoverURL(for: track), size: 42, radius: DS.Radius.small)
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {

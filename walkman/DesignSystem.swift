@@ -221,13 +221,17 @@ struct ChipBar<T: Hashable>: View {
 /// pick the highest available quality and render it as a coloured pill.
 /// Returns nil for 128k (no badge in the official UI).
 enum QualityBadgeStyle {
-    case hires      // flac24bit
+    case master     // 臻品母带
+    case atmos      // 臻品全景声 / 2.0
+    case hires      // flac24bit / hires
     case lossless   // flac
     case hq         // 320k
     case sq         // 128k (rendered only when forced, e.g. in player)
 
     var label: String {
         switch self {
+        case .master:   return "Master"
+        case .atmos:    return "Atmos"
         case .hires:    return "Hi-Res"
         case .lossless: return "SQ"
         case .hq:       return "HQ"
@@ -236,6 +240,8 @@ enum QualityBadgeStyle {
     }
     var tint: Color {
         switch self {
+        case .master:   return Color(red: 0.84, green: 0.32, blue: 0.20)  // 赤铜
+        case .atmos:    return Color(red: 0.20, green: 0.50, blue: 0.92)  // 蓝
         case .hires:    return Color(red: 0.85, green: 0.62, blue: 0.13)  // 金
         case .lossless: return Color(red: 0.40, green: 0.30, blue: 0.85)  // 紫
         case .hq:       return Color(red: 0.10, green: 0.55, blue: 0.42)  // 青绿
@@ -243,17 +249,18 @@ enum QualityBadgeStyle {
         }
     }
     init?(highestIn qualities: [Quality]) {
-        if qualities.contains(.flac24) { self = .hires }
-        else if qualities.contains(.flac) { self = .lossless }
-        else if qualities.contains(.k320) { self = .hq }
-        else { return nil }   // 128k or empty → no badge in list rows
+        guard let best = Quality.ranked.first(where: { qualities.contains($0) }),
+              best != .k128 else { return nil }   // 128k or empty → no badge in list rows
+        self.init(quality: best)
     }
     init(quality: Quality) {
         switch quality {
-        case .flac24: self = .hires
-        case .flac:   self = .lossless
-        case .k320:   self = .hq
-        case .k128:   self = .sq
+        case .master:           self = .master
+        case .atmosPlus, .atmos: self = .atmos
+        case .hires, .flac24:   self = .hires
+        case .flac:             self = .lossless
+        case .k320:             self = .hq
+        case .k128:             self = .sq
         }
     }
 }
@@ -488,6 +495,36 @@ final class ArtworkColors: ObservableObject {
                               blue: Double(botB) / Double(botN) / 255)
         return (primary, secondary)
     }
+}
+
+// MARK: - Mac 桌面版页内大标题
+//
+// Catalyst 上 UIKit 导航栏的 large title 左贴边+深色色带,跟桌面版其它页面
+// (资料库/歌单广场的 32pt 圆体大标题)完全不搭 — 这些页面在 Mac 上隐藏导航栏
+// 标题,改用这个组件;iPhone/iPad 不用,保持系统导航标题。
+struct MacPageHeader<Trailing: View>: View {
+    let title: String
+    @ViewBuilder var trailing: () -> Trailing
+
+    init(_ title: String, @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.title = title
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(alignment: .center) {
+            Text(title)
+                .font(.system(size: 32, weight: .heavy, design: .rounded))
+                .foregroundStyle(DS.Palette.textPrimary)
+            Spacer()
+            trailing()
+        }
+        .padding(.top, 8)
+    }
+}
+
+extension MacPageHeader where Trailing == EmptyView {
+    init(_ title: String) { self.init(title, trailing: { EmptyView() }) }
 }
 
 // MARK: - Background gradient for the player

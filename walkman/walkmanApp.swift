@@ -8,13 +8,13 @@ struct walkmanApp: App {
     /// 会自动把 NSApplicationDelegate 调用转发到我们的 UIApplicationDelegate。
     @UIApplicationDelegateAdaptor(WalkmanAppDelegate.self) private var appDelegate
 
-    @StateObject private var playback = PlaybackEngine()
-    @StateObject private var sources = SourceManager()
-    @StateObject private var playlists = PlaylistStore()
-    @StateObject private var scripts = ScriptStore()
-    @StateObject private var settings = SettingsStore()
-    @StateObject private var downloads = DownloadStore.shared
-    @StateObject private var history = PlayHistoryStore()
+    @StateObject private var playback: PlaybackEngine
+    @StateObject private var sources: SourceManager
+    @StateObject private var playlists: PlaylistStore
+    @StateObject private var scripts: ScriptStore
+    @StateObject private var settings: SettingsStore
+    @StateObject private var downloads: DownloadStore
+    @StateObject private var history: PlayHistoryStore
     @StateObject private var sleepTimer = SleepTimer()
     @StateObject private var recents = RecentTracksRecorder()
     @StateObject private var eq = EQStore()
@@ -28,6 +28,28 @@ struct walkmanApp: App {
 
     init() {
         AppNavBarAppearance.applyDefault()
+        // Stores are built here (not as inline @StateObject defaults) so they
+        // can be registered into AppServices during a background launch —
+        // Siri AudioPlaybackIntents run App.init but never connect a scene,
+        // so registration in `.task` would come too late.
+        let playback = PlaybackEngine()
+        let sources = SourceManager()
+        let playlists = PlaylistStore()
+        let scripts = ScriptStore()
+        let settings = SettingsStore()
+        let downloads = DownloadStore.shared
+        let history = PlayHistoryStore()
+        _playback = StateObject(wrappedValue: playback)
+        _sources = StateObject(wrappedValue: sources)
+        _playlists = StateObject(wrappedValue: playlists)
+        _scripts = StateObject(wrappedValue: scripts)
+        _settings = StateObject(wrappedValue: settings)
+        _downloads = StateObject(wrappedValue: downloads)
+        _history = StateObject(wrappedValue: history)
+        AppServices.shared.register(
+            playback: playback, sources: sources, playlists: playlists,
+            scripts: scripts, settings: settings, downloads: downloads,
+            history: history)
     }
 
     var body: some Scene {
@@ -65,7 +87,7 @@ struct walkmanApp: App {
                 // 必须在 PlaybackEngine 已经创建之后 install,这样 Combine
                 // 订阅当前歌曲 / 播放状态时直接拿到 publisher。
                 MacStatusBarController.shared.install(playback: playback)
-                await bootstrap()
+                await AppServices.shared.bootstrapIfNeeded()
                 // Splash lives for ~900ms — long enough for the spring reveal,
                 // short enough not to feel like a wait.
                 try? await Task.sleep(nanoseconds: 900_000_000)
@@ -77,49 +99,12 @@ struct walkmanApp: App {
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                    let titlebar = windowScene.titlebar {
                     titlebar.titleVisibility = .hidden
-                    
-                    // 如果你希望标题栏完全透明，融合你的 ZStack 背景，可以解开下面这行的注释：
-                    // titlebar.toolbar = nil
                 }
                 #endif
             }
         }
     }
 
-    private func bootstrap() async {
-        sources.fallbackEnabled = settings.enableDirectFallback
-        // Downloads reuse the same URL resolution as playback (script → other-source → direct).
-        downloads.urlResolver = { [sources] track, quality in
-            try await sources.resolveMusicURL(track: track, quality: quality).url
-        }
-        // 下载完成后写 metadata 时用 —— 跟 PlaybackEngine 共用 LyricsFetcher 的缓存。
-        downloads.lyricsResolver = { [sources] track in
-            await LyricsFetcher.shared.fetch(for: track, sources: sources)
-        }
-        playback.setURLResolver { [sources, settings, playback, downloads] track in
-            // Prefer a local downloaded file — plays offline and skips the network entirely.
-            if let local = await MainActor.run(body: { downloads.localURL(for: track.id) }) {
-                let q = await MainActor.run { downloads.quality(for: track.id) } ?? .k320
-                return ResolvedTrack(url: local, origin: .localFile, quality: q, warning: nil)
-            }
-            sources.fallbackEnabled = settings.enableDirectFallback
-            // `qualityCap` is set by PlaybackEngine when AVPlayer rejects a higher format
-            // (e.g. 24-bit Hi-Res FLAC). When set, we resolve at the lower quality instead.
-            let q = await MainActor.run { playback.qualityCap } ?? settings.preferredQuality
-            return try await sources.resolveMusicURL(track: track, quality: q)
-        }
-        // Synced lyric line shown in the CarPlay/lock-screen album field.
-        playback.setLyricsResolver { [sources] track in
-            await LyricsFetcher.shared.fetch(for: track, sources: sources)
-        }
-        // Record every track that starts playing into the play-history list.
-        playback.onTrackPlayed = { [history] track in history.record(track) }
-        for s in scripts.scripts where s.enabled {
-            await sources.load(script: s)
-        }
-        // Bring back the queue + position from the previous session (paused, no autoplay).
-        playback.restoreLastSession()
-    }
 }
 
 // MARK: - App-level UINavigationBar baseline

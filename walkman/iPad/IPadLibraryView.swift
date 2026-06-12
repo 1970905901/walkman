@@ -5,8 +5,10 @@ struct IPadLibraryView: View {
     @EnvironmentObject var playlists: PlaylistStore
     @EnvironmentObject var playback: PlaybackEngine
     @EnvironmentObject var history: PlayHistoryStore
+    @ObservedObject private var downloads = DownloadStore.shared
     @Binding var path: NavigationPath
     @State private var showCreate = false
+    @State private var showImport = false
     @State private var newName = ""
 
     private var recentTracks: [Track] { Array(history.tracks.prefix(12)) }
@@ -37,6 +39,19 @@ struct IPadLibraryView: View {
                 newName = ""
             }
         }
+        // Mac Catalyst 上 sheet 的 dismiss 不可靠,统一走 popover(同 IPadRootView 设置弹窗)。
+        #if targetEnvironment(macCatalyst)
+        .popover(isPresented: $showImport) {
+            LocalImportSheet()
+                .environmentObject(playlists)
+                .frame(width: 480, height: 560)
+        }
+        #else
+        .sheet(isPresented: $showImport) {
+            LocalImportSheet()
+                .environmentObject(playlists)
+        }
+        #endif
     }
 
     // MARK: - Header
@@ -51,10 +66,17 @@ struct IPadLibraryView: View {
                     .foregroundStyle(DS.Palette.textTertiary)
             }
             Spacer()
-            Button { showCreate = true } label: {
+            Menu {
+                Button { showCreate = true } label: {
+                    Label("创建歌单", systemImage: "plus.square.on.square")
+                }
+                Button { showImport = true } label: {
+                    Label("本地导入", systemImage: "folder.badge.plus")
+                }
+            } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "plus")
-                    Text("新建歌单")
+                    Text("添加歌单")
                 }
                 .font(.system(size: 13, weight: .semibold))
                 .padding(.horizontal, 14)
@@ -72,7 +94,7 @@ struct IPadLibraryView: View {
     private var continueListening: some View {
         if let last = recentTracks.first {
             HStack(spacing: 20) {
-                Artwork(url: last.picURL, size: 140, radius: 16)
+                Artwork(url: downloads.displayCoverURL(for: last), size: 140, radius: 16)
                     .shadow(color: .black.opacity(0.2), radius: 16, y: 8)
                 VStack(alignment: .leading, spacing: 8) {
                     Text("继续听")
@@ -141,7 +163,7 @@ struct IPadLibraryView: View {
                             playback.play(track: t, in: recentTracks, startIndex: idx)
                         } label: {
                             IPadAlbumCard(
-                                imageURL: t.picURL,
+                                imageURL: downloads.displayCoverURL(for: t),
                                 title: t.name,
                                 subtitle: t.singer,
                                 fallbackTint: t.source.tint,
@@ -171,7 +193,7 @@ struct IPadLibraryView: View {
                         // 采用 iPhone 统一的规范化卡片骨架
                         VStack(alignment: .leading, spacing: 10) {
                             let tracksInPlaylist = playlists.tracks(in: p)
-                            let coverURLs = Array(tracksInPlaylist.prefix(4).map { $0.picURL })
+                            let coverURLs = tracksInPlaylist.prefix(4).map { downloads.displayCoverURL(for: $0) }
                             
                             // 四宫格拼图组件：彻底去掉写死的 R 尺寸，改用弹性比
                             CoverMosaicView(urls: coverURLs)

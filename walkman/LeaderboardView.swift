@@ -126,10 +126,15 @@ private struct BoardRow: View {
 struct BoardDetailView: View {
     let board: BoardInfo
     @EnvironmentObject var playback: PlaybackEngine
+    @EnvironmentObject var playlists: PlaylistStore
+    @EnvironmentObject var downloads: DownloadStore
     @StateObject private var artwork = ArtworkColors()
     @State private var tracks: [Track] = []
     @State private var isLoading = false
     @State private var error: String?
+    // 弹窗状态在根 view —— 见 SonglistDetailView 同位置注释(Mac 行级 sheet 问题)。
+    @State private var trackToFavorite: Track?
+    @State private var trackToDownload: Track?
 
     var body: some View {
         Group {
@@ -189,7 +194,9 @@ struct BoardDetailView: View {
                             }
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
-                            .trackRowSwipe(t)
+                            .trackRowSwipe(t,
+                                           onAddToPlaylist: { trackToFavorite = $0 },
+                                           onDownload: { trackToDownload = $0 })
                         }
                     }
                 }
@@ -216,6 +223,30 @@ struct BoardDetailView: View {
         )
         .navigationTitle(board.name)
         .navigationBarTitleDisplayMode(.inline)
+        // 收藏/下载弹窗 —— Mac → .popover,iPad/iPhone → .sheet(同 SonglistDetailView)。
+        #if targetEnvironment(macCatalyst)
+        .popover(item: $trackToFavorite) { t in
+            AddToPlaylistSheet(track: t)
+                .environmentObject(playlists)
+                .frame(width: 480, height: 560)
+        }
+        .popover(item: $trackToDownload) { t in
+            DownloadSheet(track: t)
+                .environmentObject(downloads)
+                .frame(width: 480, height: 600)
+        }
+        #else
+        .sheet(item: $trackToFavorite) { t in
+            AddToPlaylistSheet(track: t)
+                .environmentObject(playlists)
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $trackToDownload) { t in
+            DownloadSheet(track: t)
+                .environmentObject(downloads)
+                .presentationDragIndicator(.visible)
+        }
+        #endif
         .task {
             artwork.extract(from: board.picURL)
             guard tracks.isEmpty, !isLoading else { return }

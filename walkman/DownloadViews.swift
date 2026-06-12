@@ -19,7 +19,7 @@ struct DownloadSheet: View {
         self.track = track
         self.onClose = onClose
         let qs = track.qualities.isEmpty ? [.k320] : track.qualities
-        let best: Quality = qs.contains(.flac24) ? .flac24 : qs.contains(.flac) ? .flac : qs.contains(.k320) ? .k320 : .k128
+        let best: Quality = Quality.ranked.first { qs.contains($0) } ?? .k128
         _quality = State(initialValue: best)
         _folderID = State(initialValue: DownloadStore.shared.folders.first?.id ?? UUID())
     }
@@ -31,7 +31,7 @@ struct DownloadSheet: View {
 
     private var availableQualities: [Quality] {
         let qs = Set(track.qualities.isEmpty ? [.k320] : track.qualities)
-        return [.flac24, .flac, .k320, .k128].filter { qs.contains($0) }
+        return Quality.ranked.filter { qs.contains($0) }
     }
 
     var body: some View {
@@ -39,7 +39,7 @@ struct DownloadSheet: View {
             Form {
                 Section("歌曲") {
                     HStack(spacing: 12) {
-                        Artwork(url: track.picURL, size: 48, radius: DS.Radius.small)
+                        Artwork(url: downloads.displayCoverURL(for: track), size: 48, radius: DS.Radius.small)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(track.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
                             Text(track.singer).font(.caption).foregroundColor(.secondary).lineLimit(1)
@@ -121,13 +121,36 @@ struct DownloadedView: View {
 
     var body: some View {
         ScrollView {
+            #if targetEnvironment(macCatalyst)
+            MacPageHeader("本地与下载") {
+                HStack(spacing: 16) {
+                    Button { showNewFolder = true } label: {
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(DS.Palette.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("新建子歌单")
+                    NavigationLink {
+                        DownloadsStatusView()
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(DS.Palette.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("下载状态")
+                }
+            }
+            .padding(.horizontal, DS.Spacing.l)
+            #endif
             LazyVGrid(columns: columns, spacing: 14) {
                 ForEach(downloads.folders) { folder in
                     let folderTracks = downloads.tracks(in: folder)
                     NavigationLink {
                         DownloadFolderView(folderID: folder.id)
                     } label: {
-                        DownloadFolderCard(folder: folder, coverURLs: Array(folderTracks.prefix(4).map { $0.picURL }), count: folderTracks.count)
+                        DownloadFolderCard(folder: folder, coverURLs: folderTracks.prefix(4).map { downloads.displayCoverURL(for: $0) }, count: folderTracks.count)
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -140,6 +163,12 @@ struct DownloadedView: View {
             .padding(DS.Spacing.l)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if targetEnvironment(macCatalyst)
+        // 和资料库等 Mac 详情页保持同一背景 — brandedSurface 的底色和外层容器
+        // (IPadRootView 的 contentBackground)不同,顶部安全区会露出一条色带。
+        .background(IPad.Color.contentBackground)
+        .toolbar(.hidden, for: .navigationBar)
+        #else
         .brandedSurface()
         .navigationTitle("已下载")
         .navigationBarTitleDisplayMode(.large)
@@ -151,6 +180,7 @@ struct DownloadedView: View {
                 NavigationLink { DownloadsStatusView() } label: { Image(systemName: "arrow.down.circle") }
             }
         }
+        #endif
         .alert("新建子歌单", isPresented: $showNewFolder) {
             TextField("名称", text: $newFolderName)
             Button("取消", role: .cancel) { newFolderName = "" }
@@ -228,6 +258,11 @@ struct DownloadFolderView: View {
                                 Label("删除", systemImage: "trash")
                             }
                         }
+                        .contextMenu {
+                            Button(role: .destructive) { downloads.removeDownload(trackID: t.id) } label: {
+                                Label("删除下载", systemImage: "trash")
+                            }
+                        }
                     }
                 } header: {
                     Text("曲目")
@@ -256,7 +291,7 @@ struct DownloadFolderView: View {
     @ViewBuilder
     private func header(folder: DownloadFolder, tracks: [Track]) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            CoverMosaic(urls: Array(tracks.prefix(4).map { $0.picURL }))
+            CoverMosaic(urls: tracks.prefix(4).map { downloads.displayCoverURL(for: $0) })
                 .frame(width: 110, height: 110)
                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))
                 .elevation(DS.Elevation.e2())
@@ -330,6 +365,11 @@ struct DownloadsStatusView: View {
                                 Label("删除", systemImage: "trash")
                             }
                         }
+                        .contextMenu {
+                            Button(role: .destructive) { downloads.removeDownload(trackID: rec.track.id) } label: {
+                                Label("删除记录", systemImage: "trash")
+                            }
+                        }
                     }
                 } header: { sectionHeader("失败", count: failed.count) }
             }
@@ -341,6 +381,16 @@ struct DownloadsStatusView: View {
                         ))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) { downloads.removeDownload(trackID: rec.track.id) } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) { downloads.removeDownload(trackID: rec.track.id) } label: {
+                                Label("删除下载", systemImage: "trash")
+                            }
+                        }
                     }
                 } header: { sectionHeader("已完成", count: completed.count) }
             }
@@ -373,7 +423,7 @@ struct DownloadsStatusView: View {
 
     private func statusRow(_ rec: DownloadRecord, trailing: AnyView) -> some View {
         HStack(spacing: 12) {
-            Artwork(url: rec.track.picURL, size: 40, radius: DS.Radius.small)
+            Artwork(url: downloads.displayCoverURL(for: rec.track), size: 40, radius: DS.Radius.small)
             VStack(alignment: .leading, spacing: 2) {
                 Text(rec.track.name)
                     .font(.system(size: 14, weight: .medium))

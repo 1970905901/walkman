@@ -14,6 +14,7 @@ import SwiftUI
 
 struct IPadBottomBar: View {
     @EnvironmentObject var playback: PlaybackEngine
+    @ObservedObject private var downloads = DownloadStore.shared
     var onOpenPlayer: () -> Void
     /// True when the full-screen player is open above this bar. Used to hide
     /// the cover thumbnail (since the big vinyl already shows the artwork)
@@ -23,6 +24,7 @@ struct IPadBottomBar: View {
     @State private var isScrubbing = false
     @State private var scrubValue: Double = 0
     @State private var showQueue = false
+    @State private var volumeBeforeMute: Float = 0.7
 
     // MV state — owned here so the bar can present its own fullScreenCover and
     // doesn't depend on PlayerView being visible.
@@ -57,14 +59,22 @@ struct IPadBottomBar: View {
                 .frame(height: 0.5),
             alignment: .top
         )
-        // 播放队列 — large detent only,iPad 屏大没必要给 medium(默认半屏太
-        // 矮看不到几首歌)。一拉就开到大约 90% 高度。
+        // 播放队列 — Mac → .popover(点外面/Esc 关,跟设置弹窗一致);iPad → .sheet,
+        // large detent only(默认半屏太矮看不到几首歌)。
+        #if targetEnvironment(macCatalyst)
+        .popover(isPresented: $showQueue) {
+            NavigationStack { QueueView() }
+                .environmentObject(playback)
+                .frame(width: 480, height: 640)
+        }
+        #else
         .sheet(isPresented: $showQueue) {
             NavigationStack { QueueView() }
                 .inheritedAppearance()
                 .presentationDragIndicator(.visible)
                 .presentationDetents([.large])
         }
+        #endif
         // MV player presented as full-screen — video deserves edge-to-edge.
         .fullScreenCover(item: $mvInfo) { info in
             if let track = playback.currentTrack {
@@ -94,20 +104,24 @@ struct IPadBottomBar: View {
         // 中间 transport 真正居中 — 左右两侧等宽,避免之前 trackInfo(320pt)
         // 跟 rightTools(200pt minWidth)宽度不对称导致中间按钮偏右。
         HStack(spacing: 16) {
+            // 打开全屏播放器的热区只有左侧歌曲信息区(含右边的空白) ——
+            // 中间 prev/play/next 和音量往右的工具区误触太烦,不参与。
             trackInfo
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { onOpenPlayer() }
             transport
-            rightTools
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            // 下一首和音量之间的空白也可点开播放器;rightTools 本身(音量往右)不参与。
+            HStack(spacing: 0) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpenPlayer() }
+                rightTools
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 18)
         .frame(height: 72)
-        // 整个 mainRow 空白区(transport 右侧的 spacer / rightTools 左侧的 spacer)
-        // 都触发打开播放器。内部 Button(prev/play/next/loop/MV/queue)优先消费
-        // tap,所以不会被这个 gesture 抢走。之前只有歌名区可点是因为 Spacer
-        // 没绑任何 gesture,trackInfo 旁边和 rightTools 左边大块空白都死区。
-        .contentShape(Rectangle())
-        .onTapGesture { onOpenPlayer() }
     }
 
     @ViewBuilder
@@ -118,7 +132,7 @@ struct IPadBottomBar: View {
                     // 全屏播放器打开时,大彩胶已经显示了封面 — 这里隐藏小封面
                     // 避免视觉冗余(同步 QQ 桌面端"播放器展开"时下方栏行为)
                     if !compactMode {
-                        Artwork(url: track.picURL, size: 52, radius: 8)
+                        Artwork(url: downloads.displayCoverURL(for: track), size: 52, radius: 8)
                             .shadow(color: .black.opacity(0.2), radius: 5, y: 2)
                     }
                     VStack(alignment: .leading, spacing: 3) {
@@ -219,6 +233,41 @@ struct IPadBottomBar: View {
 
     private var rightTools: some View {
         HStack(spacing: 14) {
+            // 应用内音量 — 只在 Mac 出现(iPad/iPhone 用系统音量键,不需要)。
+            // 跟状态栏菜单里的 slider 是同一个 playback.volume,双向同步。
+            #if targetEnvironment(macCatalyst)
+            HStack(spacing: 9) {
+                // 点图标静音/恢复 — 恢复用静音前的音量
+                Button {
+                    if playback.volume > 0.001 {
+                        volumeBeforeMute = playback.volume
+                        playback.volume = 0
+                    } else {
+                        playback.volume = volumeBeforeMute > 0.001 ? volumeBeforeMute : 0.7
+                    }
+                } label: {
+                    Image(systemName: playback.volume <= 0.001 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(DS.Palette.textSecondary)
+                        .frame(width: 20, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(playback.volume <= 0.001 ? "恢复音量" : "静音")
+                Slider(value: Binding(
+                    get: { Double(playback.volume) },
+                    set: { playback.volume = Float($0) }
+                ), in: 0...1)
+                .controlSize(.mini)
+                // 0.7 缩放把 Catalyst 上偏大的滑块整体缩小(轨道+圆钮),
+                // 先给 120 再缩到 84,内外宽度刚好对齐,不留布局空隙。
+                .frame(width: 120)
+                .scaleEffect(0.7)
+                .frame(width: 84)
+            }
+            .help("音量")
+            #endif
+
             // 播放模式 — 顺序 / 单曲 / 随机 三态循环。共享 PlaybackCycleMode
             // 跟 PlayerView/QueueView 保持同步。
             Button {

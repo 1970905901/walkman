@@ -19,12 +19,31 @@ nonisolated enum Quality: String, Codable, CaseIterable, Hashable, Sendable {
     case k320 = "320k"
     case flac = "flac"
     case flac24 = "flac24bit"
+    case hires = "hires"
+    case atmos = "atmos"
+    case atmosPlus = "atmos_plus"
+    case master = "master"
     var displayName: String {
         switch self {
         case .k128: return "标准 128k"
         case .k320: return "高品 320k"
         case .flac: return "无损 FLAC"
         case .flac24: return "Hi-Res 24bit"
+        case .hires: return "Hi-Res 高解析"
+        case .atmos: return "臻品全景声"
+        case .atmosPlus: return "臻品全景声 2.0"
+        case .master: return "臻品母带"
+        }
+    }
+    /// Highest → lowest. Single source of truth for cascade order and "pick the best" logic.
+    static let ranked: [Quality] = [.master, .atmosPlus, .atmos, .hires, .flac24, .flac, .k320, .k128]
+    /// Tiers above flac24bit. Official search metadata rarely advertises these, so
+    /// availability checks let the script backend decide instead of requiring the
+    /// track to list them — a wrong guess just falls through the quality cascade.
+    var isExtendedTier: Bool {
+        switch self {
+        case .hires, .atmos, .atmosPlus, .master: return true
+        case .k128, .k320, .flac, .flac24: return false
         }
     }
 }

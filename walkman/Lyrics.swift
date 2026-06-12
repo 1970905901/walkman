@@ -97,10 +97,23 @@ final class LyricsFetcher {
     static let shared = LyricsFetcher()
     private var cache: [String: [LyricLine]] = [:]
 
+    /// 已下载歌曲的本地文件里嵌入了 LRC(下载时写入的)。AppServices 注入,
+    /// 返回嵌入的原始 LRC 文本;非下载歌曲/读不到返回 nil。
+    var localLyricsProvider: ((Track) async -> String?)?
+
     func fetch(for track: Track, sources: SourceManager) async -> [LyricLine] {
         if let hit = cache[track.id] {
             print("[Lyrics] cache hit for \(track.id) (\(hit.count) lines, first: \"\(hit.first?.text ?? "")\")")
             return hit
+        }
+        // 已下载的歌优先读文件内嵌歌词 —— 离线可用,而且就是下载时拉到的同一份。
+        if let raw = await localLyricsProvider?(track), !raw.isEmpty {
+            let lines = Self.mergeSameTimeTranslations(LRCParser.parse(raw))
+            if !lines.isEmpty {
+                print("[Lyrics] from embedded file: \(lines.count) lines for \(track.id)")
+                cache[track.id] = lines
+                return lines
+            }
         }
         // Try user script first
         if let lines = await tryScript(track: track, sources: sources) {
@@ -173,6 +186,27 @@ final class LyricsFetcher {
             )
         default: return nil
         }
+    }
+
+    /// LRCSerializer 写翻译时用的是"同一时间戳再写一行"。读回来时把同时间戳的
+    /// 相邻两行合并回 原文 + translation,跟在线获取的结构保持一致。
+    nonisolated static func mergeSameTimeTranslations(_ lines: [LyricLine]) -> [LyricLine] {
+        var out: [LyricLine] = []
+        var i = 0
+        var nextID = 0
+        while i < lines.count {
+            let cur = lines[i]
+            if cur.time >= 0, cur.translation == nil, i + 1 < lines.count,
+               lines[i + 1].time == cur.time, !cur.text.isEmpty, !lines[i + 1].text.isEmpty {
+                out.append(LyricLine(id: nextID, time: cur.time, text: cur.text, translation: lines[i + 1].text))
+                i += 2
+            } else {
+                out.append(LyricLine(id: nextID, time: cur.time, text: cur.text, translation: cur.translation))
+                i += 1
+            }
+            nextID += 1
+        }
+        return out
     }
 
     func clear() { cache.removeAll() }

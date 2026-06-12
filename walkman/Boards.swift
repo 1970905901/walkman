@@ -155,7 +155,10 @@ nonisolated struct KuwoBoardService: BoardService {
         if codes.contains("MP3128") { qualities.append(.k128) }
         if codes.contains("MP3H")  { qualities.append(.k320) }
         if codes.contains("ALFLAC") { qualities.append(.flac) }
-        if codes.contains("AC4256") || codes.contains("DDJOC768") { qualities.append(.flac24) }
+        if codes.contains("HIRFLAC") || codes.contains("AC4256") || codes.contains("DDJOC768") { qualities.append(.flac24) }
+        if codes.contains("HIRFLAC") { qualities.append(.hires) }
+        // AC4256 / DDJOC768 are Dolby codecs (AC-4 / DD+ JOC) — i.e. 全景声.
+        if codes.contains("AC4256") || codes.contains("DDJOC768") { qualities.append(.atmos) }
         if qualities.isEmpty { qualities = [.k128, .k320] }
 
         return Track(
