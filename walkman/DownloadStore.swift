@@ -288,7 +288,12 @@ final class DownloadStore: ObservableObject {
         }
         let details = await detailsTask
 
-        let ext = (quality == .flac || quality == .flac24) ? "flac" : "mp3"
+        // 优先信任 URL 自带扩展名(后端可能静默降级,hires 请求实发 mp3);
+        // 没有就按档位推断 — flac 及以上(含 hires/atmos/master)都是 FLAC 容器。
+        let urlExt = url.pathExtension.lowercased()
+        let ext = ["mp3", "flac", "m4a", "wav", "ogg"].contains(urlExt)
+            ? urlExt
+            : ((quality == .k128 || quality == .k320) ? "mp3" : "flac")
         let fileName = uniquify(
             Self.relativePath(track: track, ext: ext, trackNumber: details?.trackNumber),
             excluding: track.id

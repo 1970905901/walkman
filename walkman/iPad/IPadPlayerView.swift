@@ -244,16 +244,20 @@ struct IPadPlayerView: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(DS.Palette.cassetteBody.opacity(0.85))
                         }
-                        if let q = playback.currentQuality {
+                        // 只显示实际播放音质(同 iPhone) — 解析出 URL 前不显示,
+                        // 避免占位的"名义最高音质"和最终实际音质不一致误导用户。
+                        if let q = playback.displayQuality {
                             Text("·")
                                 .font(.system(size: 11))
                                 .foregroundStyle(DS.Palette.cassetteBody.opacity(0.45))
                             QualityBadge(style: QualityBadgeStyle(quality: q))
-                        } else if let highest = QualityBadgeStyle(highestIn: track.qualities) {
-                            Text("·")
-                                .font(.system(size: 11))
-                                .foregroundStyle(DS.Palette.cassetteBody.opacity(0.45))
-                            QualityBadge(style: highest)
+                        }
+                        // 文件头实测规格(位深/采样率/码率),不信任后端声称的档位。
+                        if let spec = playback.currentAudioSpec {
+                            Text(spec.displayText)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DS.Palette.cassetteBody.opacity(0.6))
+                                .monospacedDigit()
                         }
                         if track.extras["mvId"]?.isEmpty == false {
                             Text("·")

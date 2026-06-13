@@ -163,7 +163,9 @@ struct SettingsView: View {
         case .flac: return "waveform.path.ecg"
         case .flac24: return "waveform.path.ecg.rectangle"
         case .hires: return "sparkles.rectangle.stack"
-        case .atmos, .atmosPlus: return "spatial.audio"
+        // "spatial.audio" 不是合法 SF Symbol(渲染为空白),全景声系列用 person.spatialaudio。
+        case .atmos: return "person.spatialaudio.fill"
+        case .atmosPlus: return "person.spatialaudio.stereo.fill"
         case .master: return "crown"
         }
     }

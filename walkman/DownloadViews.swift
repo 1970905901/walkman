@@ -8,6 +8,7 @@ struct DownloadSheet: View {
     /// 走原生 dismiss() 路径。
     var onClose: (() -> Void)? = nil
     @EnvironmentObject var downloads: DownloadStore
+    @EnvironmentObject var sources: SourceManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var quality: Quality
@@ -31,7 +32,14 @@ struct DownloadSheet: View {
 
     private var availableQualities: [Quality] {
         let qs = Set(track.qualities.isEmpty ? [.k320] : track.qualities)
-        return Quality.ranked.filter { qs.contains($0) }
+        // 扩展档位(hires/atmos/master)搜索元数据基本不报,和播放选档一样
+        // 只看脚本声明(pickPlayQuality 的 isExtendedTier 旁路),否则永远选不到。
+        let scriptQs = Set(sources.loadedScripts.flatMap {
+            $0.capabilities.sources[track.source]?.qualities ?? []
+        })
+        return Quality.ranked.filter {
+            qs.contains($0) || ($0.isExtendedTier && scriptQs.contains($0))
+        }
     }
 
     var body: some View {
@@ -84,6 +92,11 @@ struct DownloadSheet: View {
             }
             .navigationTitle("下载")
             .navigationBarTitleDisplayMode(.inline)
+            // init 里拿不到 EnvironmentObject,脚本声明的扩展档位只能在这里补,
+            // 把默认选中项提到包含 atmos/master 后的真实最高档。
+            .onAppear {
+                if let best = availableQualities.first { quality = best }
+            }
             .toolbar {
                 // 见 AddToPlaylistSheet —— Mac 走 popover,不显示多余的取消按钮。
                 #if !targetEnvironment(macCatalyst)

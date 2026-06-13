@@ -146,13 +146,10 @@ struct IPadBottomBar: View {
                                 .foregroundStyle(DS.Palette.textTertiary)
                                 .lineLimit(1)
                                 .layoutPriority(1)
-                            // Quality badge 放在歌手旁,小但能扫到 — 用户要求音质可见
-                            if let q = playback.currentQuality {
+                            // Quality badge 放在歌手旁,小但能扫到 — 用户要求音质可见。
+                            // 只显示实际播放音质(同 iPhone),解析前不显示占位值。
+                            if let q = playback.displayQuality {
                                 QualityBadge(style: QualityBadgeStyle(quality: q))
-                            } else if let highest = QualityBadgeStyle(highestIn: track.qualities) {
-                                // 还没解析过 URL 时,根据搜索结果里的可用音质显示
-                                // 一个"上限"徽章 — 比一直空白更有用
-                                QualityBadge(style: highest)
                             }
                             // MV 徽章 — 只要 catalog 给了 mvId 就显示,告诉用户
                             // "这首歌有 MV";真不能播时 fetchMv() 会 toast

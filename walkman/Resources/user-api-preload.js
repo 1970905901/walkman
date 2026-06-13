@@ -150,12 +150,14 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     request: null,
   }
   const allSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'local']
+  // 包含 hires/atmos/master 等扩展档位(同新版 lx-music-mobile)。旧白名单只到
+  // flac24bit,脚本声明的臻品音质在 init 时就被过滤,导致 app 永远选不到 atmos/master。
   const supportQualitys = {
-    kw: ['128k', '320k', 'flac', 'flac24bit'],
-    kg: ['128k', '320k', 'flac', 'flac24bit'],
-    tx: ['128k', '320k', 'flac', 'flac24bit'],
-    wy: ['128k', '320k', 'flac', 'flac24bit'],
-    mg: ['128k', '320k', 'flac', 'flac24bit'],
+    kw: ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'],
+    kg: ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'],
+    tx: ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'],
+    wy: ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'],
+    mg: ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'],
     local: [],
   }
   const supportActions = {

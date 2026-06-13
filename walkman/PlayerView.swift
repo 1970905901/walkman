@@ -251,7 +251,7 @@ struct PlayerView: View {
                     Text(playback.currentTrack?.source.displayName ?? "")
                         .font(DS.Typo.bodyStrong)
                         .foregroundColor(.white)
-                    if let q = playback.currentQuality {
+                    if let q = playback.displayQuality {
                         Text(QualityBadgeStyle(quality: q).label)
                             .font(.system(size: 10, weight: .heavy, design: .rounded))
                             .foregroundColor(.white)
@@ -364,8 +364,34 @@ struct PlayerView: View {
                                 .font(DS.Typo.body)
                                 .foregroundColor(.white.opacity(0.72))
                                 .lineLimit(1)
+                            // 角标(按实测校正后的档位)+ 文件头实测规格 — 角标在前。
+                            // 背景是封面动态色,用白描边白字而非 QualityBadge 的彩色 tint,
+                            // 避免和大色块对比度不够。任一存在就显示这一行。
+                            if playback.displayQuality != nil || playback.currentAudioSpec != nil {
+                                HStack(spacing: 6) {
+                                    if let q = playback.displayQuality {
+                                        Text(QualityBadgeStyle(quality: q).label)
+                                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                                    .stroke(Color.white.opacity(0.75), lineWidth: 1)
+                                            )
+                                    }
+                                    if let spec = playback.currentAudioSpec {
+                                        Text(spec.displayText)
+                                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                            .foregroundColor(.white.opacity(0.5))
+                                            .monospacedDigit()
+                                    }
+                                }
+                                .transition(.opacity)
+                            }
                         }
                         .padding(.top, DS.Spacing.xl)
+                        .animation(DS.Motion.standard, value: playback.currentAudioSpec)
+                        .animation(DS.Motion.standard, value: playback.displayQuality)
                     }
                     .id(track.id)
                     .transition(.asymmetric(

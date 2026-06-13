@@ -28,6 +28,30 @@ final class PlaybackEngine: ObservableObject {
     @Published var cascadeNotice: String?  // soft notice when AVPlayer rejected a quality and we auto-downgraded
     @Published private(set) var currentOrigin: ResolveOrigin?  // which mechanism produced the playing URL
     @Published private(set) var currentQuality: Quality?  // actual quality of the playing URL (after cascade)
+    /// 文件头实测的真实规格(FLAC 位深/采样率、MP3 码率)。音源后端可能静默降级而
+    /// lx 协议只回传 URL,所以这里不信任 currentQuality,自己探测。探测中/失败为 nil。
+    @Published private(set) var currentAudioSpec: AudioSpec?
+
+    /// 角标用的音质:按实测规格把声称档位往下钳。酷我等后端会静默降级
+    /// (请求 hires 实发 16/44.1 FLAC 甚至 128k MP3),协议只回 URL 无从得知,
+    /// 只能靠文件头实测校正。探测未完成/失败时按声称档位显示。
+    var displayQuality: Quality? {
+        guard let claimed = currentQuality else { return nil }
+        guard let spec = currentAudioSpec else { return claimed }
+        let ceiling: Quality
+        if spec.codec == "MP3" {
+            ceiling = (spec.bitrateKbps ?? 0) >= 256 ? .k320 : .k128
+        } else if let bps = spec.bitsPerSample, bps > 16 {
+            // 母带要求 24bit 且 ≥176.4kHz;普通 24bit 最高算 Hi-Res。
+            ceiling = spec.sampleRate >= 176400 ? .master : .hires
+        } else {
+            // 16bit FLAC:全景声 2.0 是 16/44.1 双声道渲染,规格上和 CD 无异,放行。
+            if claimed == .atmos || claimed == .atmosPlus { return claimed }
+            ceiling = .flac
+        }
+        let rank = { (q: Quality) in Quality.ranked.firstIndex(of: q) ?? 0 }
+        return rank(claimed) < rank(ceiling) ? ceiling : claimed
+    }
     /// 应用内独立音量(0…1),与系统音量无关。目前只有 Mac 暴露 UI;iPhone/iPad
     /// 不出 UI、默认 1,行为与从前完全一致。两条播放链路(AVPlayer / libFLAC)都吃它。
     @Published var volume: Float = UserDefaults.standard.object(forKey: "playback.volume") as? Float ?? 1 {
@@ -349,6 +373,13 @@ final class PlaybackEngine: ObservableObject {
         usingHiRes = false
         currentURL = url
         print("[PlaybackEngine] startPlayback url=\(url.absoluteString)")
+        currentAudioSpec = nil
+        Task { [weak self] in
+            let spec = await AudioSpecProbe.probe(url: url)
+            guard let self, self.currentURL == url else { return }
+            self.currentAudioSpec = spec
+            if let spec { print("[PlaybackEngine] probed spec: \(spec.displayText)") }
+        }
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         p.automaticallyWaitsToMinimizeStalling = true
