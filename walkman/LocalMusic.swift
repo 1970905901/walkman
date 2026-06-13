@@ -135,14 +135,39 @@ final class LocalMusicStore {
                 cover = try? await art.load(.dataValue)
             }
         }
-        if cover == nil {
-            cover = EmbeddedTagReader.read(at: file, wantCover: true, wantLyrics: false).cover
+        // AVFoundation 对 FLAC 的 Vorbis Comment 经常读不到 ARTIST/TITLE/ALBUM —
+        // 自己解析一遍兜底。MP3 的 ID3 文本帧也顺手覆盖,有些文件 ID3 头格式让
+        // AVF 解码失败但我们直接按 spec 读没问题。封面缺失时也复用这一次调用。
+        let needFields = artist.isEmpty || (album?.isEmpty ?? true)
+            || title == file.deletingPathExtension().lastPathComponent
+        if cover == nil || needFields {
+            let tags = EmbeddedTagReader.read(at: file,
+                                              wantCover: cover == nil,
+                                              wantLyrics: false,
+                                              wantFields: needFields)
+            if cover == nil { cover = tags.cover }
+            if artist.isEmpty, let a = tags.artist, !a.isEmpty { artist = a }
+            if (album?.isEmpty ?? true), let al = tags.album, !al.isEmpty { album = al }
+            if let t = tags.title, !t.isEmpty,
+               title == file.deletingPathExtension().lastPathComponent {
+                title = t
+            }
         }
         if artist.isEmpty {
+            // 文件名约定 "歌手 - 歌名",但常见的 "01 - 歌名" / "08 - 歌名" 前半是
+            // track number 不是歌手 — 全数字(含 "01"/"03A" 之类纯数字段)拒绝拆分。
             let parts = title.components(separatedBy: " - ")
             if parts.count == 2 {
-                artist = parts[0].trimmingCharacters(in: .whitespaces)
-                title = parts[1].trimmingCharacters(in: .whitespaces)
+                let head = parts[0].trimmingCharacters(in: .whitespaces)
+                let isAllDigits = !head.isEmpty
+                    && head.unicodeScalars.allSatisfy { CharacterSet.decimalDigits.contains($0) }
+                if !isAllDigits {
+                    artist = head
+                    title = parts[1].trimmingCharacters(in: .whitespaces)
+                } else {
+                    // 把 track number 前缀从标题里剥掉,让 UI 干净 — 不会写回 Track number 字段。
+                    title = parts[1].trimmingCharacters(in: .whitespaces)
+                }
             }
         }
         if artist.isEmpty { artist = "未知歌手" }

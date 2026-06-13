@@ -11,34 +11,42 @@ nonisolated enum EmbeddedTagReader {
     struct Tags: Sendable {
         var cover: Data?
         var lyrics: String?
+        /// AVFoundation 对 FLAC 的 commonMetadata 支持参差不齐(Vorbis Comment 经常
+        /// 读不到 ARTIST/TITLE/ALBUM),作为本地导入的兜底自己解析一遍。
+        var title: String?
+        var artist: String?
+        var album: String?
     }
 
-    static func read(at url: URL, wantCover: Bool = true, wantLyrics: Bool = true) -> Tags {
+    static func read(at url: URL,
+                     wantCover: Bool = true, wantLyrics: Bool = true,
+                     wantFields: Bool = false) -> Tags {
         guard let fh = try? FileHandle(forReadingFrom: url) else { return Tags() }
         defer { try? fh.close() }
         guard let magic = try? fh.read(upToCount: 4), magic.count == 4 else { return Tags() }
         if magic == Data("fLaC".utf8) {
-            return readFLAC(fh, wantCover: wantCover, wantLyrics: wantLyrics)
+            return readFLAC(fh, wantCover: wantCover, wantLyrics: wantLyrics, wantFields: wantFields)
         }
         if magic.prefix(3) == Data("ID3".utf8) {
-            return readID3(fh, versionByte: magic[3], wantCover: wantCover, wantLyrics: wantLyrics)
+            return readID3(fh, versionByte: magic[3], wantCover: wantCover, wantLyrics: wantLyrics, wantFields: wantFields)
         }
         return Tags()
     }
 
     // MARK: FLAC — metadata block 链
 
-    private static func readFLAC(_ fh: FileHandle, wantCover: Bool, wantLyrics: Bool) -> Tags {
+    private static func readFLAC(_ fh: FileHandle, wantCover: Bool, wantLyrics: Bool, wantFields: Bool) -> Tags {
         var tags = Tags()
+        let wantVorbis = wantLyrics || wantFields
         while true {
             guard let header = try? fh.read(upToCount: 4), header.count == 4 else { break }
             let isLast = header[0] & 0x80 != 0
             let type = header[0] & 0x7F
             let size = Int(header[1]) << 16 | Int(header[2]) << 8 | Int(header[3])
             switch type {
-            case 4 where wantLyrics:   // VORBIS_COMMENT
+            case 4 where wantVorbis:   // VORBIS_COMMENT
                 if let payload = try? fh.read(upToCount: size), payload.count == size {
-                    tags.lyrics = vorbisLyrics(payload) ?? tags.lyrics
+                    parseVorbis(payload, into: &tags, wantLyrics: wantLyrics, wantFields: wantFields)
                 } else { return tags }
             case 6 where wantCover && tags.cover == nil:   // PICTURE
                 if let payload = try? fh.read(upToCount: size), payload.count == size {
@@ -48,12 +56,15 @@ nonisolated enum EmbeddedTagReader {
                 guard (try? fh.seek(toOffset: fh.offsetInFile + UInt64(size))) != nil else { return tags }
             }
             if isLast { break }
-            if doneReading(tags, wantCover: wantCover, wantLyrics: wantLyrics) { break }
+            if doneReading(tags, wantCover: wantCover, wantLyrics: wantLyrics, wantFields: wantFields) { break }
         }
         return tags
     }
 
-    private static func vorbisLyrics(_ d: Data) -> String? {
+    /// Vorbis Comment 一次过遍历:LYRICS + TITLE/ARTIST/ALBUM 一起拿,避免反复解析。
+    /// 多值的 ARTIST(协作艺术家)按出现顺序用 " / " 拼接 — 和 lx 习惯一致。
+    private static func parseVorbis(_ d: Data, into tags: inout Tags,
+                                    wantLyrics: Bool, wantFields: Bool) {
         var p = d.startIndex
         func readLE32() -> Int? {
             guard d.distance(from: p, to: d.endIndex) >= 4 else { return nil }
@@ -62,22 +73,36 @@ nonisolated enum EmbeddedTagReader {
             return v
         }
         guard let vendorLen = readLE32(),
-              d.distance(from: p, to: d.endIndex) >= vendorLen else { return nil }
+              d.distance(from: p, to: d.endIndex) >= vendorLen else { return }
         p = d.index(p, offsetBy: vendorLen)
-        guard let count = readLE32() else { return nil }
+        guard let count = readLE32() else { return }
+        var artists: [String] = []
         for _ in 0..<count {
             guard let len = readLE32(), len >= 0,
-                  d.distance(from: p, to: d.endIndex) >= len else { return nil }
+                  d.distance(from: p, to: d.endIndex) >= len else { return }
             let entry = d[p..<d.index(p, offsetBy: len)]
             p = d.index(p, offsetBy: len)
             guard let s = String(data: entry, encoding: .utf8),
                   let eq = s.firstIndex(of: "=") else { continue }
-            if s[..<eq].uppercased() == "LYRICS" {
-                let value = String(s[s.index(after: eq)...])
-                return value.isEmpty ? nil : value
+            let key = s[..<eq].uppercased()
+            let value = String(s[s.index(after: eq)...])
+            if value.isEmpty { continue }
+            switch key {
+            case "LYRICS" where wantLyrics && tags.lyrics == nil:
+                tags.lyrics = value
+            case "TITLE" where wantFields && tags.title == nil:
+                tags.title = value
+            case "ARTIST" where wantFields:
+                artists.append(value)
+            case "ALBUM" where wantFields && tags.album == nil:
+                tags.album = value
+            default:
+                continue
             }
         }
-        return nil
+        if wantFields, !artists.isEmpty, tags.artist == nil {
+            tags.artist = artists.joined(separator: " / ")
+        }
     }
 
     private static func picturePayload(_ d: Data) -> Data? {
@@ -105,7 +130,7 @@ nonisolated enum EmbeddedTagReader {
 
     // MARK: MP3 — ID3v2.3 / v2.4 帧
 
-    private static func readID3(_ fh: FileHandle, versionByte: UInt8, wantCover: Bool, wantLyrics: Bool) -> Tags {
+    private static func readID3(_ fh: FileHandle, versionByte: UInt8, wantCover: Bool, wantLyrics: Bool, wantFields: Bool) -> Tags {
         guard versionByte == 3 || versionByte == 4,
               let rest = try? fh.read(upToCount: 6), rest.count == 6 else { return Tags() }
         let flags = rest[1]
@@ -137,11 +162,29 @@ nonisolated enum EmbeddedTagReader {
                 tags.lyrics = usltText(Data(body))
             } else if id == "APIC", wantCover, tags.cover == nil {
                 tags.cover = apicData(Data(body))
+            } else if wantFields {
+                // T??? 文本帧:首字节是 encoding,后面是文本(可能含 null 分隔的多值,只取第一段)。
+                switch id {
+                case "TIT2" where tags.title == nil: tags.title = textFrame(Data(body))
+                case "TPE1" where tags.artist == nil: tags.artist = textFrame(Data(body))
+                case "TALB" where tags.album == nil: tags.album = textFrame(Data(body))
+                default: break
+                }
             }
             i = d.index(bodyStart, offsetBy: frameSize)
-            if doneReading(tags, wantCover: wantCover, wantLyrics: wantLyrics) { break }
+            if doneReading(tags, wantCover: wantCover, wantLyrics: wantLyrics, wantFields: wantFields) { break }
         }
         return tags
+    }
+
+    /// ID3v2 文本帧:encoding(1) + 文本。多值用 null 分隔(v2.4)或斜杠/分号(v2.3),取首段就够 UI 用。
+    private static func textFrame(_ d: Data) -> String? {
+        guard !d.isEmpty else { return nil }
+        let encoding = d[d.startIndex]
+        let body = d.dropFirst(1)
+        guard let s = decodeText(Data(body), encoding: encoding) else { return nil }
+        let trimmed = s.trimmingCharacters(in: CharacterSet(charactersIn: "\0").union(.whitespacesAndNewlines))
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func synchsafe(_ b: [UInt8]) -> Int {
@@ -196,7 +239,9 @@ nonisolated enum EmbeddedTagReader {
         }
     }
 
-    private static func doneReading(_ t: Tags, wantCover: Bool, wantLyrics: Bool) -> Bool {
-        (!wantCover || t.cover != nil) && (!wantLyrics || t.lyrics != nil)
+    private static func doneReading(_ t: Tags, wantCover: Bool, wantLyrics: Bool, wantFields: Bool = false) -> Bool {
+        (!wantCover || t.cover != nil)
+        && (!wantLyrics || t.lyrics != nil)
+        && (!wantFields || (t.title != nil && t.artist != nil && t.album != nil))
     }
 }
