@@ -15,14 +15,23 @@ enum MvResolver {
 
     /// Single entry point — dispatches to the per-source implementation.
     static func getMvUrl(for track: Track) async -> MusicVideoInfo? {
+        let result: MusicVideoInfo?
         switch track.source {
-        case .kw: return await kuwo(track)
-        case .wy: return await netease(track)
-        case .kg: return await kugou(track)
-        case .tx: return await qq(track)
-        case .mg: return await migu(track)
+        case .kw: result = await kuwo(track)
+        case .wy: result = await netease(track)
+        case .kg: result = await kugou(track)
+        case .tx: result = await qq(track)
+        case .mg: result = await migu(track)
         default:  return nil  // .local has no MV concept
         }
+        // 日志专门给"显示有 MV 徽章却放不动"的反馈用 —— 看一眼控制台就知道是
+        // 解析阶段拿不到 URL,还是拿到了但播放器拒绝。
+        if let r = result {
+            print("[MvResolver] \(track.source.rawValue) mvId=\(track.extras["mvId"] ?? "nil") qualities=\(r.qualities.count) best=\(r.bestUrl() ?? "nil")")
+        } else {
+            print("[MvResolver] \(track.source.rawValue) mvId=\(track.extras["mvId"] ?? "nil") → nil")
+        }
+        return result
     }
 
     // MARK: - Helpers
@@ -72,7 +81,12 @@ enum MvResolver {
     private static func isKuwoMvPlaceholder(_ url: String) -> Bool {
         let tail = url.split(separator: "/").last.map(String.init)?.split(separator: "?").first.map(String.init)?.lowercased() ?? ""
         if Self.kuwoPlaceholderFiles.contains(tail) { return true }
-        if tail.hasSuffix(".mp3") { return true } // a real MV is mp4
+        // 合法 MV 必须是 mp4。kw 后端无授权时除了 588957081 占位外,还会回 .mp3 / .mgg /
+        // .aac 等音频包装(都是 DRM 加密残骸,AVPlayer 拿到也只是黑屏卡死)。
+        if let dot = tail.lastIndex(of: ".") {
+            let ext = String(tail[tail.index(after: dot)...])
+            if !ext.isEmpty && ext != "mp4" && ext != "m4v" && ext != "mov" { return true }
+        }
         return false
     }
     private static let kuwoPlaceholderFiles: Set<String> = ["588957081.mp3", "588957081.mp4"]
@@ -103,7 +117,8 @@ enum MvResolver {
         let brs = (data["brs"] as? [String: Any]) ?? [:]
         var qualities: [MvQuality] = []
         for (k, v) in brs {
-            if let u = v as? String, !u.isEmpty {
+            // wy 偶尔会在最高码率档塞 .flv,过滤掉防止 AVPlayer 黑屏。
+            if let u = v as? String, !u.isEmpty, Self.isPlayableMvExt(u) {
                 qualities.append(MvQuality(type: k, url: u))
             }
         }
@@ -126,13 +141,19 @@ enum MvResolver {
         var qualities: [MvQuality] = []
         for tier in ["uhd", "rq", "sq", "hd", "sd", "lq"] {
             guard let q = data[tier] as? [String: Any] else { continue }
-            let u = ((q["downurl"] as? String) ?? "").isEmpty ? (q["url"] as? String ?? "") : (q["downurl"] as? String ?? "")
-            if !u.isEmpty { qualities.append(MvQuality(type: tier, url: u)) }
+            // kg 每档常常 downurl 是 mkv (Matroska 母版),url 是 mp4 流。AVPlayer 不
+            // 支持 mkv,必须挑 mp4 那条;两条都是 mkv 这档跳过,落到下一档。Android 的
+            // ExoPlayer 自带 mkv 解码所以 spec 偏好 downurl,iOS/Catalyst 反着来。
+            let candidates = [q["url"] as? String, q["downurl"] as? String]
+                .compactMap { $0 }.filter { !$0.isEmpty }
+            guard let chosen = candidates.first(where: isPlayableMvExt) else { continue }
+            qualities.append(MvQuality(type: tier, url: chosen))
         }
         // Fallback: some payloads put a single URL at the data root.
         if qualities.isEmpty {
             let candidates = ["downurl", "url", "mv_url", "playurl"]
-            let u = candidates.compactMap { data[$0] as? String }.first(where: { !$0.isEmpty }) ?? ""
+            let u = candidates.compactMap { data[$0] as? String }
+                .first(where: { !$0.isEmpty && isPlayableMvExt($0) }) ?? ""
             if !u.isEmpty { qualities.append(MvQuality(type: "default", url: u)) }
         }
         guard !qualities.isEmpty else { return nil }
@@ -142,6 +163,17 @@ enum MvResolver {
             pageUrl: "https://www.kugou.com/mvweb/html/mv_\(mvHash).html",
             qualities: qualities
         )
+    }
+
+    /// AVPlayer 支持的容器:mp4 / m4v / mov / HLS。kg/wy 高画质可能给 .mkv (Matroska)
+    /// 或 .flv,iOS 拿到就 -11828 黑屏。无扩展名(纯路径的 CDN)放行让播放器自己试。
+    private static func isPlayableMvExt(_ urlStr: String) -> Bool {
+        let lower = urlStr.lowercased()
+        let path = lower.split(separator: "?").first.map(String.init) ?? lower
+        guard let dot = path.lastIndex(of: ".") else { return true }
+        let ext = String(path[path.index(after: dot)...])
+        if ext.isEmpty { return true }
+        return ["mp4", "m4v", "mov", "m3u8"].contains(ext)
     }
 
     // ===================================================================== QQ Music
@@ -234,9 +266,23 @@ enum MvResolver {
             let order = (item["newFileType"] as? Int).flatMap { $0 == 0 ? nil : $0 }
                 ?? (item["filetype"] as? Int).flatMap { $0 == 0 ? nil : $0 }
                 ?? (item["format"] as? Int) ?? 0
-            entries.append((order, MvQuality(type: "\(order)", url: url)))
+            entries.append((order, MvQuality(type: qqQualityLabel(order), url: url)))
         }
         return entries.sorted(by: { $0.0 > $1.0 }).map { $0.1 }
+    }
+
+    /// QQ newFileType 数字 → 人类可读画质名。映射来自 QQ 音乐 web 实测:
+    /// 60 = 1080p, 50 = 720p, 40 = 480p, 30 = 360p, 20 = 240p。
+    private static func qqQualityLabel(_ order: Int) -> String {
+        switch order {
+        case 80...: return "4K"
+        case 60..<80: return "1080P"
+        case 50..<60: return "720P"
+        case 40..<50: return "480P"
+        case 30..<40: return "360P"
+        case 1..<30: return "240P"
+        default: return "MP4"
+        }
     }
 
     // ===================================================================== Migu

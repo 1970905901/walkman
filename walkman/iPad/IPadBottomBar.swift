@@ -78,7 +78,10 @@ struct IPadBottomBar: View {
         // MV player presented as full-screen — video deserves edge-to-edge.
         .fullScreenCover(item: $mvInfo) { info in
             if let track = playback.currentTrack {
+                // fullScreenCover 启的是新展示上下文,@EnvironmentObject 不会自动
+                // 跨边界继承(Catalyst 上必崩),手动把 MvPlayerView 用到的注回去。
                 MvPlayerView(info: info, track: track, onClose: { mvInfo = nil })
+                    .environmentObject(playback)
             }
         }
         // Toast for "正在获取 MV…" / "暂无可用 MV". Floats over the bar so it

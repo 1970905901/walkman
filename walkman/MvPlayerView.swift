@@ -353,18 +353,33 @@ struct MvPlayerView: View {
         hideWorkItem?.cancel()
     }
 
-    /// Build an `AVURLAsset` with per-source HTTP headers. NetEase's MV CDN
-    /// returns 403 unless `Referer: https://music.163.com/` is set; QQ's MV
-    /// freeflow URLs are unauthenticated and work without headers. Other
-    /// sources are not currently supported.
+    /// Build an `AVURLAsset` with per-source HTTP headers. 各家 CDN 对 UA / Referer
+    /// 的检查严格度不一样,但默认 URLSession UA 几乎所有 MV CDN 都拒(返回 403 / 抽风),
+    /// 所以给每个源都明确配置 Referer + UA。
+    /// - wy: 必须 music.163.com Referer,否则 403
+    /// - tx: y.qq.com Referer,免鉴权 freeflow URL
+    /// - kw: mobile UA 才认
+    /// - kg / mg: 桌面浏览器 UA 普遍工作
     private func makeAsset(for url: URL) -> AVURLAsset {
         var headers: [String: String] = [:]
+        let desktopUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         switch track.source {
         case .wy:
             headers["Referer"] = "https://music.163.com/"
-            headers["User-Agent"] = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
+            headers["User-Agent"] = desktopUA
         case .tx:
             headers["Referer"] = "https://y.qq.com/"
+            headers["User-Agent"] = desktopUA
+        case .kw:
+            // 用 kw web 端的 Referer,API 接口认 okhttp UA 但流媒体 CDN 认浏览器。
+            headers["Referer"] = "http://www.kuwo.cn/"
+            headers["User-Agent"] = desktopUA
+        case .kg:
+            headers["Referer"] = "https://www.kugou.com/"
+            headers["User-Agent"] = desktopUA
+        case .mg:
+            headers["Referer"] = "https://music.migu.cn/"
+            headers["User-Agent"] = desktopUA
         default:
             break
         }
@@ -398,23 +413,52 @@ struct MvPlayerView: View {
             player.removeTimeObserver(token)
             timeObserverToken = nil
         }
+        loading = true
         // 0.5s tick is enough for the scrubber — saves CPU vs 0.1s.
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [self] time in
             guard !isScrubbing else { return }
             currentTime = time.seconds.isFinite ? time.seconds : 0
             isPlaying = player.timeControlStatus == .playing
+            // 数据真的开始流就摘掉 loading;在 readyToPlay 之后还可能短暂卡 buffering,
+            // 但只要 time observer 跑起来就说明可视层至少不卡死了。
+            if loading, time.seconds.isFinite, time.seconds > 0 { loading = false }
         }
         // Item duration arrives async (after AVAsset metadata loads).
         statusObserver?.cancel()
         statusObserver = item.publisher(for: \.status)
             .receive(on: DispatchQueue.main)
-            .sink { status in
-                if status == .readyToPlay {
+            .sink { [self] status in
+                switch status {
+                case .readyToPlay:
                     let d = item.asset.duration.seconds
                     duration = d.isFinite && d > 0 ? d : 0
+                    loading = false
+                case .failed:
+                    loading = false
+                    let err = item.error as NSError?
+                    print("[MvPlayerView] AVPlayerItem failed source=\(track.source.rawValue) " +
+                          "code=\(err?.code ?? 0) domain=\(err?.domain ?? "?") msg=\(err?.localizedDescription ?? "?")")
+                    showError(mvPlaybackErrorMessage(for: err))
+                case .unknown:
+                    break
+                @unknown default:
+                    break
                 }
             }
+    }
+
+    /// Map AVFoundation 错误到用户能看懂的中文提示。MV CDN 拒绝场景比音频还多
+    /// (DRM 包装、地域限制、过期签名),不要直接抛 NSError 给用户。
+    private func mvPlaybackErrorMessage(for err: NSError?) -> String {
+        guard let err else { return "MV 播放失败" }
+        switch err.code {
+        case -11828, -11829: return "MV 格式不支持(可能被音源加密)"
+        case -1009: return "网络不可用"
+        case -1001: return "MV 加载超时"
+        case -1003, -1100, -1102: return "MV 链接已失效"
+        default: return "MV 播放失败(\(err.code))"
+        }
     }
 
     private func togglePlayPause() {
@@ -470,7 +514,9 @@ struct MvPlayerView: View {
     private func showError(_ text: String) {
         errorMessage = text
         Task {
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            // 3.5s 比之前 1.8s 长 — MV 解析+加载失败的提示要看得清,
+            // 别让用户以为是按钮没生效。
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
             await MainActor.run {
                 if errorMessage == text { errorMessage = nil }
             }

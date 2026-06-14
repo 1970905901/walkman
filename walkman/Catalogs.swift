@@ -225,35 +225,49 @@ nonisolated struct NetEaseCatalogService: CatalogService {
               let result = json["result"] as? [String: Any],
               let songs = result["songs"] as? [[String: Any]] else { return [] }
         let tracks = songs.compactMap(build)
-        return await Self.fillCovers(tracks)
+        return await Self.enrichFromDetail(tracks)
     }
 
-    /// NetEase search rarely returns album.picUrl; resolve from /api/album/{id} in parallel.
-    private static func fillCovers(_ tracks: [Track]) async -> [Track] {
-        await withTaskGroup(of: (Int, String?).self) { group -> [Track] in
-            for (idx, t) in tracks.enumerated() where t.picURL == nil {
-                guard let albumId = t.albumId else { continue }
-                group.addTask {
-                    guard let u = URL(string: "https://music.163.com/api/album/\(albumId)") else { return (idx, nil) }
-                    var req = URLRequest(url: u)
-                    req.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
-                    req.setValue(mobileUA, forHTTPHeaderField: "User-Agent")
-                    req.timeoutInterval = 6
-                    if let (data, _) = try? await URLSession.shared.data(for: req),
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let album = json["album"] as? [String: Any],
-                       let pic = album["picUrl"] as? String,
-                       !pic.isEmpty {
-                        return (idx, pic)
-                    }
-                    return (idx, nil)
-                }
-            }
-            var out = tracks
-            for await (idx, pic) in group {
-                if let pic, idx < out.count { out[idx].picURL = pic }
-            }
-            return out
+    /// 老接口 /api/search/get 不带音质字段、`mvid` 永远是 0、`album.picUrl` 也常常缺,
+    /// 用一次 /api/song/detail 批量补齐:hMusic/sqMusic/hrMusic 直读音质,真实 mvid
+    /// 用来打 MV 角标,顺便拿封面。30 条 ID 一次请求,比之前每条歌一个 /api/album/{id}
+    /// 高效得多。
+    private static func enrichFromDetail(_ tracks: [Track]) async -> [Track] {
+        guard !tracks.isEmpty else { return tracks }
+        let idList = tracks.map(\.songmid).joined(separator: ",")
+        guard let encoded = "[\(idList)]".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let u = URL(string: "https://music.163.com/api/song/detail/?ids=\(encoded)") else { return tracks }
+        var req = URLRequest(url: u)
+        req.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
+        req.setValue(mobileUA, forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 10
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let songs = json["songs"] as? [[String: Any]] else { return tracks }
+
+        struct Detail { var picURL: String?; var qualities: [Quality]; var mvId: String? }
+        var lookup: [String: Detail] = [:]
+        for s in songs {
+            guard let idAny = s["id"] else { continue }
+            let id = String(describing: idAny)
+            var qs: [Quality] = [.k128]
+            // hMusic = 320k, sqMusic = FLAC, hrMusic = Hi-Res。mMusic 是 192k 在
+            // 我们的 enum 里没有(直接归入 k128 不必要,不计),bMusic/lMusic 都是 128k。
+            if (s["hMusic"] as? [String: Any]) != nil { qs.append(.k320) }
+            if (s["sqMusic"] as? [String: Any]) != nil { qs.append(.flac) }
+            if (s["hrMusic"] as? [String: Any]) != nil { qs.append(.hires) }
+            let picURL = (s["album"] as? [String: Any])?["picUrl"] as? String
+            var mvId: String?
+            if let n = s["mvid"] as? Int, n > 0 { mvId = String(n) }
+            lookup[id] = Detail(picURL: picURL, qualities: qs, mvId: mvId)
+        }
+        return tracks.map { t in
+            guard let d = lookup[t.songmid] else { return t }
+            var nt = t
+            if let pic = d.picURL, !pic.isEmpty { nt.picURL = pic }
+            nt.qualities = d.qualities
+            if let m = d.mvId { nt.extras["mvId"] = m }
+            return nt
         }
     }
 
@@ -268,11 +282,15 @@ nonisolated struct NetEaseCatalogService: CatalogService {
         let albumId = albumD.flatMap { $0["id"].map { String(describing: $0) } }
         let pic = albumD?["picUrl"] as? String
         let duration = (d["duration"] as? Int).map { $0 / 1000 }
+        // /api/search/get 不返回 hMusic/sqMusic/hrMusic 这些音质字段,enrichFromDetail
+        // 会用 /api/song/detail 覆盖。这里只给一个 k128 兜底,保证万一 detail 失败也能播。
+        // 之前老代码把 hMusic 错映射成 flac (hMusic 其实是 320k,sqMusic 才是 FLAC),
+        // 那段误导代码已经搬到 detail enrichment 里改对了。
         var qs: [Quality] = [.k128]
-        if (d["mMusic"] as? [String: Any]) != nil { qs.append(.k320) }
-        if (d["hMusic"] as? [String: Any]) != nil { qs.append(.flac) }
-        // NetEase: mvid > 0 means there's an MV. Stored as String to fit the
-        // shared extras type; MvResolver parses it back.
+        if (d["hMusic"] as? [String: Any]) != nil { qs.append(.k320) }
+        if (d["sqMusic"] as? [String: Any]) != nil { qs.append(.flac) }
+        if (d["hrMusic"] as? [String: Any]) != nil { qs.append(.hires) }
+        // mvid 在 /api/search/get 里永远是 0 —— 真正的 mvid 由 enrichFromDetail 填。
         var extras: [String: String] = [:]
         if let mvid = d["mvid"] as? Int, mvid > 0 { extras["mvId"] = String(mvid) }
         return Track(

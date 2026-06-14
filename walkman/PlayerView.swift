@@ -174,7 +174,10 @@ struct PlayerView: View {
         // and the user explicitly opted into "watch a video", not a peek.
         .fullScreenCover(item: $mvInfo) { info in
             if let track = playback.currentTrack {
+                // fullScreenCover 启的是新展示上下文,@EnvironmentObject 不会自动
+                // 跨边界继承(Catalyst 上必崩),手动把 MvPlayerView 用到的注回去。
                 MvPlayerView(info: info, track: track, onClose: { mvInfo = nil })
+                    .environmentObject(playback)
             }
         }
         .overlay(alignment: .top) {
