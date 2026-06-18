@@ -125,7 +125,7 @@ struct IPadLibraryView: View {
                         .buttonStyle(.plain)
                         
                         Button {
-                            path.append(IPadDestination.history)
+                            path.pushDetail(IPadDestination.history)
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "clock.arrow.circlepath")
@@ -151,7 +151,7 @@ struct IPadLibraryView: View {
     private var recentCarousel: some View {
         VStack(alignment: .leading, spacing: 14) {
             IPadSectionHeader("最近播放") {
-                Button("更多") { path.append(IPadDestination.history) }
+                Button("更多") { path.pushDetail(IPadDestination.history) }
                     .buttonStyle(.plain)
                     .font(.system(size: 13))
                     .foregroundStyle(DS.Palette.textSecondary)
@@ -188,7 +188,7 @@ struct IPadLibraryView: View {
                 ForEach(playlists.playlists) { p in
                     Button {
                         // 维持 iPad 的多端路由导航
-                        path.append(IPadDestination.playlist(p.id))
+                        path.pushDetail(IPadDestination.playlist(p.id))
                     } label: {
                         // 采用 iPhone 统一的规范化卡片骨架
                         VStack(alignment: .leading, spacing: 10) {

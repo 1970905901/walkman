@@ -62,7 +62,7 @@ struct IPadSonglistView: View {
                         spacing: 22
                     ) {
                         ForEach(playlists) { list in
-                            Button { path.append(list) } label: {
+                            Button { path.pushDetail(list) } label: {
                                 IPadAlbumCard(
                                     imageURL: list.picURL,
                                     title: list.name,

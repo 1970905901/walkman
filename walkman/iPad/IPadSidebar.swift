@@ -19,6 +19,25 @@ enum IPadDestination: Hashable {
     case playlist(UUID)
 }
 
+extension NavigationPath {
+    /// 从列表/根页点卡片进详情时统一用这个,不要直接 append。
+    ///
+    /// Mac Catalyst 的 NavigationStack 在 back 手势刚触发、动画还没收尾时,如果用户
+    /// 立刻在(视觉上回到的)列表上点另一张卡片,append 会和 pop 竞态:path binding
+    /// 同步落后导致旧条目没被弹出,append 把新条目压到 [oldDetail, newDetail],
+    /// 表现是"返回到上一个打开过的歌单"。Catalyst 上重置 path 后再 append,保证
+    /// 每次进详情都是干净的 depth-1 栈,back 一定回根页。
+    ///
+    /// iPhone/iPad 触控更慢竞态不易触发,保留原来的层级累积(支持发现页"查看全部"
+    /// → 歌单列表 → 详情这种三级返回)。
+    mutating func pushDetail<V: Hashable>(_ value: V) {
+        #if targetEnvironment(macCatalyst)
+        self = NavigationPath()
+        #endif
+        append(value)
+    }
+}
+
 // MARK: - Sidebar
 
 /// QQ 音乐风的 sidebar:窄宽度(240pt)、分组分隔、selected 行带左侧色条 + 浅底色。

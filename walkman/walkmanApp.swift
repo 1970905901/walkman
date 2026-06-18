@@ -18,6 +18,10 @@ struct walkmanApp: App {
     @StateObject private var sleepTimer = SleepTimer()
     @StateObject private var recents = RecentTracksRecorder()
     @StateObject private var eq = EQStore()
+    /// 发现页 (IPadHomeView) 的内存缓存 —— 在 walkmanApp 顶层 @StateObject
+    /// 一次,这样侧边栏切走 / NavigationStack pop 重建视图时缓存还在,
+    /// 不会每次回发现页都白屏 + 重新拉网络。
+    @StateObject private var homeFeed = HomeFeedStore()
     /// Bridges Darwin notifications from the widget's transport-button intents
     /// back into PlaybackEngine. Init-once, no UI state.
     private let commandBridge = CommandBridge()
@@ -71,6 +75,7 @@ struct walkmanApp: App {
                     .environmentObject(history)
                     .environmentObject(sleepTimer)
                     .environmentObject(eq)
+                    .environmentObject(homeFeed)
 
                 if showSplash {
                     SplashView()

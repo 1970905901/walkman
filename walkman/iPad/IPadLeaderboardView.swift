@@ -32,7 +32,7 @@ struct IPadLeaderboardView: View {
                         spacing: 16
                     ) {
                         ForEach(boards) { b in
-                            Button { path.append(b) } label: {
+                            Button { path.pushDetail(b) } label: {
                                 IPadAlbumCard(
                                     imageURL: b.picURL,
                                     title: b.name,
