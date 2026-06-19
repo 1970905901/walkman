@@ -9,6 +9,7 @@ struct IPadLibraryView: View {
     @Binding var path: NavigationPath
     @State private var showCreate = false
     @State private var showImport = false
+    @State private var showSonglistImport = false
     @State private var newName = ""
 
     private var recentTracks: [Track] { Array(history.tracks.prefix(12)) }
@@ -46,9 +47,18 @@ struct IPadLibraryView: View {
                 .environmentObject(playlists)
                 .frame(width: 480, height: 560)
         }
+        .popover(isPresented: $showSonglistImport) {
+            SonglistImportSheet()
+                .environmentObject(playlists)
+                .frame(width: 480, height: 560)
+        }
         #else
         .sheet(isPresented: $showImport) {
             LocalImportSheet()
+                .environmentObject(playlists)
+        }
+        .sheet(isPresented: $showSonglistImport) {
+            SonglistImportSheet()
                 .environmentObject(playlists)
         }
         #endif
@@ -69,6 +79,9 @@ struct IPadLibraryView: View {
             Menu {
                 Button { showCreate = true } label: {
                     Label("创建歌单", systemImage: "plus.square.on.square")
+                }
+                Button { showSonglistImport = true } label: {
+                    Label("导入歌单", systemImage: "link.badge.plus")
                 }
                 Button { showImport = true } label: {
                     Label("本地导入", systemImage: "folder.badge.plus")

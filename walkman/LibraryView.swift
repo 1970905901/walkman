@@ -11,6 +11,7 @@ struct LibraryView: View {
     @EnvironmentObject var history: PlayHistoryStore
     @State private var showCreate = false
     @State private var showImport = false
+    @State private var showSonglistImport = false
     @State private var newName = ""
 
     // `adaptive(minimum: 170)` → iPhone shows 2 columns (390 px wide), iPad 3
@@ -103,6 +104,9 @@ struct LibraryView: View {
                     Button { showCreate = true } label: {
                         Label("创建歌单", systemImage: "plus.square.on.square")
                     }
+                    Button { showSonglistImport = true } label: {
+                        Label("导入歌单", systemImage: "link.badge.plus")
+                    }
                     Button { showImport = true } label: {
                         Label("本地导入", systemImage: "folder.badge.plus")
                     }
@@ -131,6 +135,10 @@ struct LibraryView: View {
         }
         .sheet(isPresented: $showImport) {
             LocalImportSheet()
+        }
+        .sheet(isPresented: $showSonglistImport) {
+            SonglistImportSheet()
+                .environmentObject(playlists)
         }
     }
 
