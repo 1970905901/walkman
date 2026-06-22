@@ -13,7 +13,10 @@ nonisolated struct DownloadFolder: Identifiable, Codable, Hashable, Sendable {
 }
 
 nonisolated enum DownloadStatus: String, Codable, Sendable {
-    case downloading, completed, failed
+    /// missing:曾经下载完成,但本地文件被用户在 Finder/外部删了。
+    /// 入口在播放时的 url resolver(见 AppServices)—— 拿不到本地路径就把状态标过来,
+    /// UI 自动从「已下载」角标切到「文件缺失」徽章,左滑可重新下载。
+    case downloading, completed, failed, missing
 }
 
 /// One downloaded (or in-flight) track: its metadata, the chosen quality, the local file name,
@@ -41,6 +44,17 @@ final class DownloadStore: ObservableObject {
     /// 不直接知道 SourceManager / LyricsFetcher 是什么。下载完会用这个去拉歌词,
     /// 然后跟封面一起写进文件 metadata。
     var lyricsResolver: ((Track) async -> [LyricLine])?
+
+    /// 同时跑的下载任务上限。SettingsStore 启动时推一次 + didSet 时同步,
+    /// 默认 10。超过这个数的 download() 会进 pendingQueue 等位。
+    var maxConcurrent: Int = 10 {
+        didSet { drainQueue() }
+    }
+    /// 等位的下载请求 —— 已经在 records 里占好 .downloading 状态(给 UI 即时反馈),
+    /// 但物理上 runDownload 还没起。activeCount 腾位置后 drainQueue 启动它们。
+    private var pendingQueue: [(track: Track, quality: Quality)] = []
+    /// 当前真正在跑的下载数(包含 resolver 解析 URL 那一段也算在内)。
+    private var activeCount: Int = 0
 
     /// 新下载会落到这里。
     /// - iPad / iPhone: 沙盒 `Documents/Downloads/`
@@ -164,11 +178,25 @@ final class DownloadStore: ObservableObject {
     // MARK: - Queries
 
     func isDownloaded(_ trackID: String) -> Bool { records[trackID]?.status == .completed }
+    func isMissing(_ trackID: String) -> Bool { records[trackID]?.status == .missing }
 
     /// Local file URL for a completed download, or nil.
     func localURL(for trackID: String) -> URL? {
         guard let rec = records[trackID], rec.status == .completed else { return nil }
         return resolveExistingURL(fileName: rec.fileName)
+    }
+
+    /// 播放路径在拿不到本地文件时调一次:status 仍是 `.completed` 但磁盘上文件
+    /// 已经没了 → 把 record 翻成 `.missing`,UI 自动切「文件缺失」徽章并提供重下入口。
+    /// 文件还在(或 record 本来就不是 completed)→ no-op,返回 false。
+    @discardableResult
+    func markMissingIfNeeded(_ trackID: String) -> Bool {
+        guard let rec = records[trackID], rec.status == .completed else { return false }
+        if resolveExistingURL(fileName: rec.fileName) != nil { return false }
+        records[trackID]?.status = .missing
+        records[trackID]?.errorMessage = "本地文件已被删除"
+        save()
+        return true
     }
 
     func quality(for trackID: String) -> Quality? { records[trackID]?.quality }
@@ -269,12 +297,33 @@ final class DownloadStore: ObservableObject {
         }
         save()
 
-        Task { await self.runDownload(track: track, quality: quality) }
+        // 入队 + 看看能不能立刻起 —— activeCount 没满就直接 drain 出去跑,
+        // 满了就等其它任务收尾时释放槽位。状态对 UI 还是 .downloading,
+        // 等位期间用户能看到「下载中」角标,体感上一致。
+        pendingQueue.append((track, quality))
+        drainQueue()
+    }
+
+    private func drainQueue() {
+        while activeCount < maxConcurrent, !pendingQueue.isEmpty {
+            let (track, quality) = pendingQueue.removeFirst()
+            // 用户在等位时把这条 record 删了 / 重设了 → 跳过。
+            guard records[track.id]?.status == .downloading else { continue }
+            activeCount += 1
+            Task { await self.runDownload(track: track, quality: quality) }
+        }
+    }
+
+    /// 单次下载的生命周期结束(成功/失败/早退)时调,腾出并发槽位让 pendingQueue 里的下一个起来。
+    private func finishSlot() {
+        activeCount = max(0, activeCount - 1)
+        drainQueue()
     }
 
     private func runDownload(track: Track, quality: Quality) async {
         guard let resolver = urlResolver else {
             fail(track.id, "下载未就绪")
+            finishSlot()
             return
         }
         // 详情(曲目号/年份/高清封面)和播放地址解析并行跑,详情失败不碍事。
@@ -284,6 +333,7 @@ final class DownloadStore: ObservableObject {
             url = try await resolver(track, quality)
         } catch {
             fail(track.id, error.localizedDescription)
+            finishSlot()
             return
         }
         let details = await detailsTask
@@ -327,6 +377,8 @@ final class DownloadStore: ObservableObject {
                         self.fail(track.id, err.localizedDescription)
                     }
                     self.save()
+                    // 释放并发槽位,让 pendingQueue 里的下一个起来。无论成功失败都要释放。
+                    self.finishSlot()
                 }
             }
         )

@@ -343,6 +343,21 @@ final class SettingsStore: ObservableObject {
             UserDefaults.standard.set(raw, forKey: "pref.homeSources")
         }
     }
+    /// 批量下载时,如果某首歌已下载但音质低于意图档算出的目标档,是否自动重下升级。
+    /// 默认开 —— 用户点「全部下载 + 选 flac」基本就是想把歌单整体提到高音质。
+    @Published var batchUpgradeQuality: Bool {
+        didSet { UserDefaults.standard.set(batchUpgradeQuality, forKey: "pref.batchUpgradeQuality") }
+    }
+    /// 同时跑的下载任务上限。批量下载 200 首一瞬间砸 200 个请求容易拖卡播放,
+    /// 默认 10,用户嫌慢可以调。1~32 区间内夹紧。
+    @Published var downloadConcurrency: Int {
+        didSet {
+            let clamped = max(1, min(32, downloadConcurrency))
+            if clamped != downloadConcurrency { downloadConcurrency = clamped; return }
+            UserDefaults.standard.set(downloadConcurrency, forKey: "pref.downloadConcurrency")
+            DownloadStore.shared.maxConcurrent = downloadConcurrency
+        }
+    }
 
     init() {
         let q = UserDefaults.standard.string(forKey: "pref.quality") ?? Quality.k320.rawValue
@@ -368,5 +383,17 @@ final class SettingsStore: ObservableObject {
         } else {
             self.homeSources = [.kw, .wy, .kg, .tx]
         }
+        // 批量升级:首次启动默认 ON。
+        if UserDefaults.standard.object(forKey: "pref.batchUpgradeQuality") == nil {
+            self.batchUpgradeQuality = true
+        } else {
+            self.batchUpgradeQuality = UserDefaults.standard.bool(forKey: "pref.batchUpgradeQuality")
+        }
+        // 并发上限:首次启动默认 10,之后读用户设置(0 当作未设置走默认)。
+        let saved = UserDefaults.standard.integer(forKey: "pref.downloadConcurrency")
+        self.downloadConcurrency = saved > 0 ? max(1, min(32, saved)) : 10
+        // 启动时把上限推给 DownloadStore —— SettingsStore 后于 DownloadStore.shared
+        // 初始化(walkmanApp 顶层),写一次就同步上了。
+        DownloadStore.shared.maxConcurrent = self.downloadConcurrency
     }
 }

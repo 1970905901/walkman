@@ -301,10 +301,12 @@ struct PlaylistDetailView: View {
     @EnvironmentObject var playlists: PlaylistStore
     @EnvironmentObject var playback: PlaybackEngine
     @EnvironmentObject var downloads: DownloadStore
+    @EnvironmentObject var settings: SettingsStore
     @StateObject private var artwork = ArtworkColors()
     // 弹窗状态在根 view —— 见 SonglistDetailView 同位置注释(Mac 行级 sheet 问题)。
     @State private var trackToFavorite: Track?
     @State private var trackToDownload: Track?
+    @State private var showBatchDownload = false
 
     private var playlist: PlaylistMeta? {
         playlists.playlists.first(where: { $0.id == playlistID })
@@ -392,6 +394,12 @@ struct PlaylistDetailView: View {
                     .environmentObject(downloads)
                     .frame(width: 480, height: 600)
             }
+            .popover(isPresented: $showBatchDownload) {
+                BatchDownloadSheet(tracks: tracks)
+                    .environmentObject(downloads)
+                    .environmentObject(settings)
+                    .frame(width: 480, height: 620)
+            }
             #else
             .sheet(item: $trackToFavorite) { t in
                 AddToPlaylistSheet(track: t)
@@ -401,6 +409,12 @@ struct PlaylistDetailView: View {
             .sheet(item: $trackToDownload) { t in
                 DownloadSheet(track: t)
                     .environmentObject(downloads)
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showBatchDownload) {
+                BatchDownloadSheet(tracks: tracks)
+                    .environmentObject(downloads)
+                    .environmentObject(settings)
                     .presentationDragIndicator(.visible)
             }
             #endif
@@ -425,17 +439,31 @@ struct PlaylistDetailView: View {
                     .font(DS.Typo.numeric)
                     .foregroundStyle(DS.Palette.textTertiary)
                 if !tracks.isEmpty {
-                    Button {
-                        playback.play(track: tracks[0], in: tracks, startIndex: 0)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "play.fill")
-                            Text("播放全部")
+                    HStack(spacing: 8) {
+                        Button {
+                            playback.play(track: tracks[0], in: tracks, startIndex: 0)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "play.fill")
+                                Text("播放全部")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
                         }
-                        .font(.system(size: 13, weight: .semibold))
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                        Button {
+                            showBatchDownload = true
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.down.circle")
+                                Text("全部下载")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
                     .padding(.top, 2)
                 }
             }

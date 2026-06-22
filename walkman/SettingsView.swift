@@ -35,6 +35,23 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("批量下载时升级已下载音质", isOn: $settings.batchUpgradeQuality)
+                Stepper(value: $settings.downloadConcurrency, in: 1...32) {
+                    HStack {
+                        Text("同时下载数")
+                        Spacer()
+                        Text("\(settings.downloadConcurrency)")
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+            } header: {
+                Text("下载")
+            } footer: {
+                Text("「全部下载」时,如果歌单里有已下载但音质低于这次选的目标档的歌曲,自动重下升级。同时下载数控制并发上限(1–32,默认 10),太大可能拖慢播放和搜索")
+            }
+
+            Section {
                 Toggle("脚本失败时走内置直连 (非官方)", isOn: $settings.enableDirectFallback)
                 NavigationLink {
                     ScriptManagerView()

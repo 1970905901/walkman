@@ -250,13 +250,21 @@ struct DownloadFolderView: View {
                 }
                 Section {
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { idx, t in
+                        let missing = downloads.isMissing(t.id)
                         HStack(alignment: .center, spacing: 4) {
                             Text("\(idx + 1)")
                                 .font(DS.Typo.numeric)
                                 .foregroundStyle(DS.Palette.textTertiary)
                                 .frame(width: 28)
                             TrackRow(track: t)
-                            if let q = downloads.quality(for: t.id) {
+                            if missing {
+                                // 用户在 Finder 把源文件删了 —— 替代原来的「质量」徽章,
+                                // 红色 + 文案点明状态,左滑里给一键重下入口。
+                                Label("文件缺失", systemImage: "exclamationmark.triangle.fill")
+                                    .labelStyle(.titleAndIcon)
+                                    .font(DS.Typo.caption2)
+                                    .foregroundStyle(.red)
+                            } else if let q = downloads.quality(for: t.id) {
                                 Text(q.displayName)
                                     .font(DS.Typo.caption2)
                                     .foregroundStyle(DS.Palette.textTertiary)
@@ -267,11 +275,27 @@ struct DownloadFolderView: View {
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing) {
+                            if missing {
+                                // retry 内部读 record 自带的 folderID,这里不需要再传 folder。
+                                Button {
+                                    downloads.retry(trackID: t.id)
+                                } label: {
+                                    Label("重新下载", systemImage: "arrow.clockwise.icloud")
+                                }
+                                .tint(.indigo)
+                            }
                             Button(role: .destructive) { downloads.removeDownload(trackID: t.id) } label: {
                                 Label("删除", systemImage: "trash")
                             }
                         }
                         .contextMenu {
+                            if missing {
+                                Button {
+                                    downloads.retry(trackID: t.id)
+                                } label: {
+                                    Label("重新下载", systemImage: "arrow.clockwise.icloud")
+                                }
+                            }
                             Button(role: .destructive) { downloads.removeDownload(trackID: t.id) } label: {
                                 Label("删除下载", systemImage: "trash")
                             }
@@ -341,6 +365,7 @@ struct DownloadsStatusView: View {
 
     private var active: [DownloadRecord] { records(.downloading) }
     private var failed: [DownloadRecord] { records(.failed) }
+    private var missing: [DownloadRecord] { records(.missing) }
     private var completed: [DownloadRecord] { records(.completed) }
 
     private func records(_ status: DownloadStatus) -> [DownloadRecord] {
@@ -385,6 +410,37 @@ struct DownloadsStatusView: View {
                         }
                     }
                 } header: { sectionHeader("失败", count: failed.count) }
+            }
+            if !missing.isEmpty {
+                Section {
+                    ForEach(missing, id: \.track.id) { rec in
+                        statusRow(rec, trailing: AnyView(
+                            Button { downloads.retry(trackID: rec.track.id) } label: {
+                                Image(systemName: "arrow.clockwise.icloud")
+                                    .foregroundStyle(DS.Palette.brandStart)
+                            }.buttonStyle(.borderless)
+                        ))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing) {
+                            Button { downloads.retry(trackID: rec.track.id) } label: {
+                                Label("重新下载", systemImage: "arrow.clockwise.icloud")
+                            }
+                            .tint(.indigo)
+                            Button(role: .destructive) { downloads.removeDownload(trackID: rec.track.id) } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                        .contextMenu {
+                            Button { downloads.retry(trackID: rec.track.id) } label: {
+                                Label("重新下载", systemImage: "arrow.clockwise.icloud")
+                            }
+                            Button(role: .destructive) { downloads.removeDownload(trackID: rec.track.id) } label: {
+                                Label("删除记录", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: { sectionHeader("文件缺失", count: missing.count) }
             }
             if !completed.isEmpty {
                 Section {
@@ -460,6 +516,218 @@ struct DownloadsStatusView: View {
             }
             Spacer(minLength: 8)
             trailing
+        }
+    }
+}
+
+// MARK: - Batch download sheet (整张歌单一次下完)
+//
+// 用户在 PlaylistDetailView header 点「全部下载」打开。逻辑跟单曲 DownloadSheet
+// 同构:选音质、选子歌单。区别是音质是「意图档」——每首歌走自己的 qualities,
+// 取 ≤ 意图档的最高(都没就取该歌支持的最高一档),不强求每首都下到同一档。
+// 已完成的歌跳过,正在下载的也跳过;.failed / .missing / 无记录都算「待下载」。
+
+struct BatchDownloadSheet: View {
+    let tracks: [Track]
+    var onClose: (() -> Void)? = nil
+    @EnvironmentObject var downloads: DownloadStore
+    @EnvironmentObject var sources: SourceManager
+    @EnvironmentObject var settings: SettingsStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var quality: Quality = .flac
+    @State private var folderID: UUID
+    @State private var showNewFolder = false
+    @State private var newFolderName = ""
+
+    init(tracks: [Track], onClose: (() -> Void)? = nil) {
+        self.tracks = tracks
+        self.onClose = onClose
+        _folderID = State(initialValue: DownloadStore.shared.folders.first?.id ?? UUID())
+    }
+
+    /// 一次性算好的统计 —— 避免 body 里反复调函数。
+    private struct Stats {
+        var alreadyDone = 0           // .completed 且已经 ≥ 目标档(跳过)
+        var willUpgrade: [Track] = [] // .completed 但档位低于目标档(开启升级时纳入 pending)
+        var inFlight = 0              // .downloading(防重入,跳过)
+        var pending: [Track] = []     // 无记录 / .failed / .missing → 一定下
+    }
+    private var stats: Stats {
+        var s = Stats()
+        for t in tracks {
+            switch downloads.records[t.id]?.status {
+            case .completed:
+                // 已下载档位 vs 这次意图档算出来的目标档:目标更高 → 可升级。
+                let currentQ = downloads.records[t.id]?.quality ?? .k128
+                let targetQ = pickPerTrackQuality(for: t)
+                if rank(targetQ) > rank(currentQ) {
+                    s.willUpgrade.append(t)
+                } else {
+                    s.alreadyDone += 1
+                }
+            case .downloading:
+                s.inFlight += 1
+            default:
+                s.pending.append(t)
+            }
+        }
+        return s
+    }
+    /// 实际要发起下载的歌:pending 永远算,willUpgrade 看用户设置。
+    private var tracksToEnqueue: [Track] {
+        settings.batchUpgradeQuality ? (stats.pending + stats.willUpgrade) : stats.pending
+    }
+
+    /// 意图档候选 —— 取这堆歌里有任何一首支持的最高档,加上脚本声明的扩展档位。
+    /// 用户选一档,具体每首走 `pickPerTrackQuality` 再 normalize。
+    private var availableQualities: [Quality] {
+        var union = Set<Quality>()
+        for t in tracks { union.formUnion(t.qualities) }
+        if union.isEmpty { union = [.k320] }
+        let scriptQs = Set(sources.loadedScripts.flatMap {
+            $0.capabilities.sources.values.flatMap { $0.qualities }
+        })
+        return Quality.ranked.filter { union.contains($0) || ($0.isExtendedTier && !scriptQs.isEmpty) }
+    }
+
+    /// 对单首歌:取她 qualities 里 ≤ 意图档的最高;都不满足(罕见,意味着这首歌最低
+    /// 一档都比意图档高)取她最高的一档兜底,反正用户既然点了批量就想全下完。
+    private func pickPerTrackQuality(for track: Track) -> Quality {
+        let qs = track.qualities.isEmpty ? [.k320] : track.qualities
+        // Quality.ranked 从高到低,第一个「该歌支持 且 不高于意图档」的就是要的。
+        if let pick = Quality.ranked.first(where: { qs.contains($0) && rank($0) <= rank(quality) }) {
+            return pick
+        }
+        return Quality.ranked.first { qs.contains($0) } ?? .k320
+    }
+    private func rank(_ q: Quality) -> Int {
+        // 反向 index —— 越靠后(质量越低)分越高,方便 ≤ 意图档的比较。
+        Quality.ranked.firstIndex(of: q).map { Quality.ranked.count - $0 } ?? 0
+    }
+
+    private func closeNow() {
+        onClose?()
+        dismiss()
+    }
+
+    private var canStart: Bool {
+        !tracksToEnqueue.isEmpty && !downloads.folders.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("歌单") {
+                    HStack(spacing: 10) {
+                        Image(systemName: "music.note.list")
+                            .font(.system(size: 20))
+                            .foregroundStyle(DS.Palette.brandStart)
+                            .frame(width: 40, height: 40)
+                            .background(Color(.tertiarySystemFill),
+                                        in: RoundedRectangle(cornerRadius: DS.Radius.small))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("共 \(tracks.count) 首")
+                                .font(.system(size: 15, weight: .semibold))
+                            Text(summaryLine)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                Section("音质(意图档)") {
+                    Picker("音质", selection: $quality) {
+                        ForEach(availableQualities, id: \.self) { q in
+                            Text(q.displayName).tag(q)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    Text("每首歌按自己支持的最高档下载,不超过这里选的。")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                Section("下载到子歌单") {
+                    Picker("子歌单", selection: $folderID) {
+                        ForEach(downloads.folders) { f in
+                            Text(f.name).tag(f.id)
+                        }
+                    }
+                    Button {
+                        showNewFolder = true
+                    } label: {
+                        Label("新建子歌单", systemImage: "folder.badge.plus")
+                    }
+                }
+                Section {
+                    Button {
+                        startBatch()
+                        closeNow()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label(startButtonTitle, systemImage: "arrow.down.circle.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                            Spacer()
+                        }
+                    }
+                    .disabled(!canStart)
+                }
+            }
+            .navigationTitle("全部下载")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if let best = availableQualities.first { quality = best }
+            }
+            .toolbar {
+                #if !targetEnvironment(macCatalyst)
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { closeNow() }
+                }
+                #endif
+            }
+            .toolbarBackground(.thinMaterial, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .alert("新建子歌单", isPresented: $showNewFolder) {
+                TextField("名称", text: $newFolderName)
+                Button("取消", role: .cancel) { newFolderName = "" }
+                Button("创建") {
+                    let n = newFolderName.trimmingCharacters(in: .whitespaces)
+                    if !n.isEmpty {
+                        let f = downloads.createFolder(name: n)
+                        folderID = f.id
+                    }
+                    newFolderName = ""
+                }
+            }
+        }
+    }
+
+    private var summaryLine: String {
+        let s = stats
+        var parts: [String] = []
+        if s.alreadyDone > 0 { parts.append("已下载 \(s.alreadyDone) 首") }
+        if s.inFlight > 0 { parts.append("下载中 \(s.inFlight) 首") }
+        if settings.batchUpgradeQuality && !s.willUpgrade.isEmpty {
+            parts.append("可升级 \(s.willUpgrade.count) 首")
+        }
+        parts.append("待下载 \(s.pending.count) 首")
+        return parts.joined(separator: " · ")
+    }
+
+    private var startButtonTitle: String {
+        let n = tracksToEnqueue.count
+        if n == 0 { return "无歌曲可下载" }
+        return "开始下载 \(n) 首"
+    }
+
+    private func startBatch() {
+        let queue = tracksToEnqueue
+        guard !queue.isEmpty else { return }
+        // 串行 enqueue;实际的并发上限由 DownloadStore.maxConcurrent 控,
+        // 这里只管把任务全部投进去。
+        for t in queue {
+            downloads.download(track: t, quality: pickPerTrackQuality(for: t), folderID: folderID)
         }
     }
 }

@@ -61,7 +61,14 @@ final class AppServices {
                                      quality: track.qualities.first ?? .k320, warning: nil)
             }
             // Prefer a local downloaded file — plays offline and skips the network entirely.
-            if let local = await MainActor.run(body: { downloads.localURL(for: track.id) }) {
+            // 同时 lazy 校验:record 说是 completed 但文件没了(用户手动在 Finder 删了)
+            // → 把 record 翻成 .missing,UI 自动切「文件缺失」徽章,本次播放透传到网络。
+            let localOrMissing: URL? = await MainActor.run {
+                if let url = downloads.localURL(for: track.id) { return url }
+                downloads.markMissingIfNeeded(track.id)
+                return nil
+            }
+            if let local = localOrMissing {
                 let q = await MainActor.run { downloads.quality(for: track.id) } ?? .k320
                 return ResolvedTrack(url: local, origin: .localFile, quality: q, warning: nil)
             }
