@@ -56,7 +56,7 @@ struct IPadVinylDisc: View {
                 .allowsHitTesting(false)
 
             // 4. 中心轴孔
-            spindle
+//            spindle
             
             // 5. 【终极完美版】右下侧现代流线型长唱针
             tonearmCanvas
