@@ -141,30 +141,11 @@ struct SettingsView: View {
         .navigationTitle("设置")
         // 在 Mac Catalyst 桌面端下，inline 模式配合透明背景能展现出最完美的居中标题栏
         .navigationBarTitleDisplayMode(isMacCatalyst ? .inline : .large)
-        
-        // MARK: - Mac Catalyst 专属：动态导航栏渲染重刷
-        #if targetEnvironment(macCatalyst)
-        .onAppear {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithTransparentBackground() // 彻底把暗红底色刷成 100% 透明
-            
-            // 🛠️ 修正这里：标题改为深色（Label 色），确保在浅色背景上清晰可见
-            appearance.titleTextAttributes = [
-                .foregroundColor: UIColor.label,
-                .font: UIFont.systemFont(ofSize: 16, weight: .semibold)
-            ]
-            
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-        }
-        .onDisappear {
-            // 关闭时恢复到 walkmanApp 启动时设的默认外观 —— 之前这里把全局 UINavigationBar
-            // 改成品牌红 + 白字,但应用根本就没有红色导航栏的设计,这个"恢复"是凭空造出来
-            // 的状态,会污染后续所有 NavigationStack(包括 sheet 里的导航栏,典型表现就是
-            // 收藏/下载弹窗顶部出现一条丑陋的暗红色 bar 配白字标题)。
-            AppNavBarAppearance.applyDefault()
-        }
-        #endif
+        // 之前这里用 onAppear 改全局 UINavigationBar.appearance() 来做透明栏 —— 代理
+        // 只影响之后创建的导航栏,本弹窗自己的栏赶不上,滚动后照样变成深色毛玻璃,
+        // 还要靠 onDisappear 恢复全局状态。换成 SwiftUI 的 per-view 修饰符,只作用
+        // 于当前 NavigationStack,不污染别处。
+        .sheetNavBarSurface()
     }
 
     private var appVersion: String {

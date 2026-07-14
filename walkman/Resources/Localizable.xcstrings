@@ -1061,6 +1061,16 @@
         }
       }
     },
+    "正在导入 %lld/%lld 首…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "正在导入 %1$lld/%2$lld 首…"
+          }
+        }
+      }
+    },
     "正在影响当前播放" : {
 
     },

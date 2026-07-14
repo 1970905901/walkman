@@ -255,8 +255,14 @@ struct IPadBottomBar: View {
                 .buttonStyle(.plain)
                 .help(playback.volume <= 0.001 ? "恢复音量" : "静音")
                 Slider(value: Binding(
-                    get: { Double(playback.volume) },
-                    set: { playback.volume = Float($0) }
+                    get: {
+                        // 逆运算：将底层的绝对音量开立方根，正确反馈到滑块的线性位置上
+                        Double(cbrt(playback.volume))
+                    },
+                    set: {
+                        // 正运算：滑块值进行 3 次方计算，让音量衰减曲线平滑、自然
+                        playback.volume = Float(pow($0, 3))
+                    }
                 ), in: 0...1)
                 .controlSize(.mini)
                 // 0.7 缩放把 Catalyst 上偏大的滑块整体缩小(轨道+圆钮),

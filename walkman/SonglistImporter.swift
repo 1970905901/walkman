@@ -51,10 +51,12 @@ nonisolated enum SonglistImporter {
             (.wy, [
                 #"music\.163\.com[^\s]*?[?#&]id=(\d+)"#,
             ]),
-            // QQ:y.qq.com/n/ryqq/playlist/<id>、taoge.html?id=<id>、i.y.qq.com/n2/m/share/details/taoge.html?id=<id>
+            // QQ:y.qq.com/n/ryqq/playlist/<id>、taoge.html?id=<id>、i.y.qq.com/n2/m/share/details/taoge.html?id=<id>、
+            //    i2.y.qq.com/n3/other/pages/details/playlist.html?...&id=<id>(微信分享)
             (.tx, [
                 #"y\.qq\.com/n/ryqq/playlist/(\d+)"#,
                 #"qq\.com[^\s]*?taoge\.html[^\s]*?[?&]id=(\d+)"#,
+                #"qq\.com[^\s]*?playlist\.html[^\s]*?[?&]id=(\d+)"#,
                 #"y\.qq\.com[^\s]*?/playsquare/(\d+)"#,
             ]),
             // 酷狗:www.kugou.com/songlist/<specialid>/、t1.kugou.com 分享、listid=
@@ -91,12 +93,17 @@ nonisolated enum SonglistImporter {
 
     // MARK: - Import
 
-    /// 拉歌单 → 建本地歌单 → 写入。返回新建歌单的 id 和导入曲目数。
+    /// 分批写入的批大小 —— 每批之间让出主线程,千首大歌单导入时 UI 不卡死。
+    private static let batchSize = 100
+
+    /// 拉歌单 → 建本地歌单 → 分批写入。返回新建歌单的 id 和导入曲目数。
+    /// progress 在每批写完后回调 (已导入, 总数),用于 UI 进度展示。
     @MainActor
     static func importPlaylist(
         ref: ParsedRef,
         customName: String?,
-        playlists: PlaylistStore
+        playlists: PlaylistStore,
+        progress: ((Int, Int) -> Void)? = nil
     ) async throws -> (playlistID: UUID, count: Int) {
         guard let svc = Songlists.service(for: ref.source) else {
             throw ImportError.unrecognizedURL
@@ -119,8 +126,19 @@ nonisolated enum SonglistImporter {
         let name = !trimmed.isEmpty ? trimmed
             : (detail.info.name.isEmpty ? "导入的歌单" : detail.info.name)
         let p = playlists.createPlaylist(name: name)
-        playlists.addTracks(detail.tracks, to: p.id)
-        return (p.id, detail.tracks.count)
+        // 分批写入:中间批次不落盘(save 会整包编码 trackBank,是主线程卡顿大头),
+        // 每批之间 yield 让 UI 有机会刷新,最后统一 persist 一次。
+        let all = detail.tracks
+        var start = 0
+        while start < all.count {
+            let end = min(start + batchSize, all.count)
+            playlists.addTracks(Array(all[start..<end]), to: p.id, persist: false)
+            progress?(end, all.count)
+            start = end
+            if start < all.count { await Task.yield() }
+        }
+        playlists.persist()
+        return (p.id, all.count)
     }
 }
 
@@ -135,6 +153,8 @@ struct SonglistImportSheet: View {
     /// 用户没贴 URL 只贴了纯 ID 时,需要他选个平台。URL 模式下这个被自动覆盖。
     @State private var manualSource: SourceID = .wy
     @State private var importing = false
+    /// 分批写入阶段的进度 (已导入, 总数);拉取阶段为 nil。
+    @State private var importProgress: (done: Int, total: Int)?
     @State private var doneCount: Int?
     @State private var error: String?
 
@@ -191,8 +211,14 @@ struct SonglistImportSheet: View {
 
                 if importing {
                     Section {
-                        ProgressView {
-                            Text("正在拉取曲目…").font(.caption)
+                        if let p = importProgress {
+                            ProgressView(value: Double(p.done), total: Double(p.total)) {
+                                Text("正在导入 \(p.done)/\(p.total) 首…").font(.caption)
+                            }
+                        } else {
+                            ProgressView {
+                                Text("正在拉取曲目…").font(.caption)
+                            }
                         }
                     }
                 }
@@ -215,6 +241,7 @@ struct SonglistImportSheet: View {
             }
             .navigationTitle("导入歌单")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetNavBarSurface()
             // Mac 走 popover —— 跟本地导入弹窗一致,见 LocalImportSheet 同位置注释。
             #if !targetEnvironment(macCatalyst)
             .toolbar {
@@ -237,18 +264,19 @@ struct SonglistImportSheet: View {
             error = "无法识别链接 / ID"
             return
         }
-        importing = true; error = nil
+        importing = true; error = nil; importProgress = nil
         do {
             let result = try await SonglistImporter.importPlaylist(
-                ref: ref, customName: customName, playlists: playlists
+                ref: ref, customName: customName, playlists: playlists,
+                progress: { done, total in importProgress = (done, total) }
             )
-            importing = false
+            importing = false; importProgress = nil
             doneCount = result.count
             // 让用户看一眼 "导入完成" 再收起 —— 同 LocalImportSheet 节奏
             try? await Task.sleep(nanoseconds: 900_000_000)
             dismiss()
         } catch {
-            importing = false
+            importing = false; importProgress = nil
             self.error = error.localizedDescription
         }
     }

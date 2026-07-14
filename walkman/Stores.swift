@@ -108,15 +108,29 @@ final class PlaylistStore: ObservableObject {
         playlist.trackIDs.compactMap { trackBank[$0] }
     }
 
-    func addTracks(_ tracks: [Track], to playlistID: UUID) {
+    /// persist: false 时只改内存不落盘 —— 大歌单分批导入用,中间批次跳过
+    /// save()(整个 trackBank 的 JSON 编码 + 写盘 + 推云都在主线程,是卡顿大头),
+    /// 调用方在最后一批之后调 persist() 统一落盘。
+    func addTracks(_ tracks: [Track], to playlistID: UUID, persist: Bool = true) {
         guard let idx = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
+        var existing = Set(playlists[idx].trackIDs)
+        var newIDs: [String] = []
+        var additions: [String: Track] = [:]
         for t in tracks {
-            trackBank[t.id] = t
-            if !playlists[idx].trackIDs.contains(t.id) {
-                playlists[idx].trackIDs.append(t.id)
+            additions[t.id] = t
+            if existing.insert(t.id).inserted {
+                newIDs.append(t.id)
             }
         }
+        // 整批合并/追加,@Published 只各触发一次,避免逐首 append 刷 1000 次 UI
+        trackBank.merge(additions) { _, new in new }
+        playlists[idx].trackIDs.append(contentsOf: newIDs)
         playlists[idx].updatedAt = Date()
+        if persist { save() }
+    }
+
+    /// 配合 addTracks(persist: false) 使用,分批写完后统一落盘 + 推云。
+    func persist() {
         save()
     }
 

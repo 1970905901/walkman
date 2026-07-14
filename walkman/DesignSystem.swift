@@ -135,6 +135,15 @@ extension View {
             .tint(Color("AccentColor"))
     }
 
+    /// Mac Catalyst 弹窗(popover)里 NavigationStack 的导航栏修复:内容滚到栏下方后,
+    /// 系统给栏切换成 chrome material 毛玻璃,而 popover 是独立浮窗,栏的 chrome 会被
+    /// 解析成深色 —— 毛玻璃变黑、标题变白字。只钉背景色不够(标题仍是白字,栏底还会
+    /// 漏出一条没盖住的深色毛玻璃),必须同时把栏的配色方案钉成和弹窗内容一致。
+    /// 仅 Catalyst 生效,iPad/iPhone 上是 no-op。
+    func sheetNavBarSurface() -> some View {
+        modifier(SheetNavBarSurfaceModifier())
+    }
+
     /// Top-level tab surface: a brand gradient wash on top of the base. Dark mode
     /// uses heavier opacity so the wash actually reads on a deep background;
     /// light mode is half-strength so it stays Apple-Music-restrained rather than
@@ -329,6 +338,23 @@ struct UIKitSpinner: UIViewRepresentable {
     }
     func updateUIView(_ uiView: UIActivityIndicatorView, context: Context) {
         uiView.startAnimating()
+    }
+}
+
+/// Backs `View.sheetNavBarSurface()`. ViewModifier 形式是为了读到弹窗内容自己的
+/// `colorScheme` —— popover 的 SwiftUI 内容跟随应用的明暗是对的,错的只是 UIKit
+/// 导航栏 chrome,所以让栏强制跟内容一个方案即可,深色模式下同样成立。
+private struct SheetNavBarSurfaceModifier: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        content
+            .toolbarBackground(DS.Palette.bgBase, for: .navigationBar)
+            .toolbarColorScheme(scheme, for: .navigationBar)
+        #else
+        content
+        #endif
     }
 }
 

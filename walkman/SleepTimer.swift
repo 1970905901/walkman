@@ -162,6 +162,7 @@ struct SleepTimerSheet: View {
             }
             .navigationTitle("睡眠定时")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetNavBarSurface()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("完成") { dismiss() }

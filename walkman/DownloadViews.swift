@@ -92,6 +92,7 @@ struct DownloadSheet: View {
             }
             .navigationTitle("下载")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetNavBarSurface()
             // init 里拿不到 EnvironmentObject,脚本声明的扩展档位只能在这里补,
             // 把默认选中项提到包含 atmos/master 后的真实最高档。
             .onAppear {
@@ -676,6 +677,7 @@ struct BatchDownloadSheet: View {
             }
             .navigationTitle("全部下载")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetNavBarSurface()
             .onAppear {
                 if let best = availableQualities.first { quality = best }
             }

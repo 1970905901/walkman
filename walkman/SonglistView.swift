@@ -242,6 +242,7 @@ struct TagFilterSheet: View {
             }
             .navigationTitle("筛选")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetNavBarSurface()
             // Mac 上是 popover,点外部即可关闭,不需要取消按钮。
             #if !targetEnvironment(macCatalyst)
             .toolbar {

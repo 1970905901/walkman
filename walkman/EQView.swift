@@ -28,6 +28,7 @@ struct EQView: View {
         .brandedSurface()
         .navigationTitle("均衡器")
         .navigationBarTitleDisplayMode(.large)
+        .sheetNavBarSurface()
     }
 
     // MARK: - Master row

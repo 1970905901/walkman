@@ -41,6 +41,7 @@ struct RecognizeView: View {
             .brandedSurface()
             .navigationTitle("听歌识曲")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetNavBarSurface()
             // Mac 上是 popover,点外部即可关闭,不需要关闭按钮。
             #if !targetEnvironment(macCatalyst)
             .toolbar {

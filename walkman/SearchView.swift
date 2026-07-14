@@ -455,6 +455,7 @@ struct AddToPlaylistSheet: View {
             }
             .navigationTitle("收藏到歌单")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetNavBarSurface()
             .toolbar {
                 // Mac Catalyst 上这个 sheet 走 .popover —— 点外面 / Esc 都能关,
                 // 顶栏的"取消"按钮反而是多余的(还可能误导用户)。只在 iOS 显示。

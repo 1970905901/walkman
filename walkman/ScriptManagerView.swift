@@ -82,6 +82,7 @@ struct ScriptManagerView: View {
         }
         .navigationTitle("自定义音源")
         .navigationBarTitleDisplayMode(.inline)
+        .sheetNavBarSurface()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showImport = true } label: { Image(systemName: "plus") }
@@ -140,6 +141,7 @@ struct ScriptManagerView: View {
                 }
                 .navigationTitle("导入脚本")
                 .navigationBarTitleDisplayMode(.inline)
+                .sheetNavBarSurface()
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("取消") { showImport = false; reset() }

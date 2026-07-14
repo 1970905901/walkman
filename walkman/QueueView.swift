@@ -45,6 +45,7 @@ struct QueueView: View {
             }
             .navigationTitle("播放队列")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetNavBarSurface()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("完成") { dismiss() }

@@ -116,11 +116,12 @@ struct walkmanApp: App {
 
 /// One source of truth for the app's UINavigationBar appearance.
 ///
-/// Any screen that temporarily overrides `UINavigationBar.appearance()`
-/// (e.g. `SettingsView` swaps to a transparent bar while it's open) MUST call
-/// `applyDefault()` in `.onDisappear` to put the baseline back. Restoring to
-/// an invented "brand red" value (the previous bug) poisoned every sheet
-/// presented afterwards because UIKit appearance proxies are global state.
+/// Applied once at launch. Per-screen tweaks must NOT go through
+/// `UINavigationBar.appearance()` — the proxy is global state and only affects
+/// bars created afterwards (SettingsView once tried a transparent bar that way:
+/// its own bar never picked it up, and the "restore" poisoned every sheet
+/// presented later). Use SwiftUI per-view modifiers instead, e.g.
+/// `sheetNavBarSurface()` in DesignSystem.
 enum AppNavBarAppearance {
     /// Rounded inline titles + PingFang large titles to give Chinese headings
     /// real character (default SF Pro renders 汉字 with the system fallback,

@@ -247,8 +247,9 @@ final class MacStatusBarController: NSObject {
         let sel = NSSelectorFromString("sliderWithValue:minValue:maxValue:target:action:")
         guard let method = class_getClassMethod(sliderClass, sel) else { return }
         typealias MakeFn = @convention(c) (AnyClass, Selector, Double, Double, Double, NSObject?, Selector?) -> NSObject
+        // 滑块位置 = 音量的立方根,跟 IPadBottomBar 的音量曲线保持一致
         let slider = unsafeBitCast(method_getImplementation(method), to: MakeFn.self)(
-            sliderClass, sel, Double(playback?.volume ?? 1), 0, 1, self, #selector(_volumeChanged(_:)))
+            sliderClass, sel, Double(cbrt(playback?.volume ?? 1)), 0, 1, self, #selector(_volumeChanged(_:)))
         setFrame(container, CGRect(x: 0, y: 0, width: 220, height: 26))
         // 左边距 14 跟普通菜单项文字对齐
         setFrame(slider, CGRect(x: 14, y: 3, width: 192, height: 19))
@@ -287,7 +288,7 @@ final class MacStatusBarController: NSObject {
         playback.$volume
             .receive(on: DispatchQueue.main)
             .sink { [weak self] v in
-                self?.volumeSlider?.setValue(NSNumber(value: Double(v)), forKey: "doubleValue")
+                self?.volumeSlider?.setValue(NSNumber(value: Double(cbrt(v))), forKey: "doubleValue")
             }
             .store(in: &cancellables)
     }
@@ -388,7 +389,8 @@ final class MacStatusBarController: NSObject {
 
     @objc private func _volumeChanged(_ sender: NSObject) {
         if let v = sender.value(forKey: "doubleValue") as? Double {
-            playback?.volume = Float(v)
+            // 滑块值立方后写入音量,跟 IPadBottomBar 的音量曲线保持一致
+            playback?.volume = Float(pow(v, 3))
         }
     }
 
