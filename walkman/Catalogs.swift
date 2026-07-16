@@ -129,21 +129,18 @@ nonisolated struct KugouCatalogService: CatalogService {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let d = json["data"] as? [String: Any],
               let items = d["lists"] as? [[String: Any]] else { return [] }
+        // 去重必须用 Track.id(= Audioid,兜底 FileHash):同一录音在不同专辑里
+        // FileHash 不同但 Audioid 相同,按 FileHash 去重会放进一堆相同 id 的行,
+        // ForEach 身份冲突 → 列表空行、序号错乱。保留搜索排序里的第一个。
         var seen = Set<String>()
         var out: [Track] = []
+        func append(_ d: [String: Any]) {
+            guard let t = build(d), seen.insert(t.id).inserted else { return }
+            out.append(t)
+        }
         for item in items {
-            let hash = (item["FileHash"] as? String) ?? ""
-            guard !hash.isEmpty, !seen.contains(hash) else { continue }
-            seen.insert(hash)
-            if let t = build(item) { out.append(t) }
-            if let grp = item["Grp"] as? [[String: Any]] {
-                for sub in grp {
-                    let h = (sub["FileHash"] as? String) ?? ""
-                    if h.isEmpty || seen.contains(h) { continue }
-                    seen.insert(h)
-                    if let t = build(sub) { out.append(t) }
-                }
-            }
+            append(item)
+            for sub in (item["Grp"] as? [[String: Any]]) ?? [] { append(sub) }
         }
         return out
     }

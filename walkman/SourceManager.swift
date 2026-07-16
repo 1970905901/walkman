@@ -217,7 +217,10 @@ final class SourceManager: ObservableObject {
         for q in tryList[startIdx...] {
             // Extended tiers (hires/atmos/master): official metadata rarely lists them,
             // so script support alone is enough — failures fall through the cascade.
-            if (trackQualities.contains(q) || q.isExtendedTier) && scriptQualities.contains(q) {
+            // flac24/flac 同理:QQ 对 VIP 曲目常不下发 size_flac,元数据漏标不等于
+            // 没有 —— 脚本声明支持就尝试,拼错的 URL 由 PlaybackEngine 的 404 降级兜底。
+            if (trackQualities.contains(q) || q.isExtendedTier || q == .flac24 || q == .flac)
+                && scriptQualities.contains(q) {
                 return q
             }
         }
@@ -238,9 +241,10 @@ final class SourceManager: ObservableObject {
             // k128 is the universal floor — try it even if not in scriptQualities since
             // the bundled lx backend always carries 128k for the supported sources.
             // `first` is always included (it's the already-picked starting point), and
-            // extended tiers only need script support (see pickPlayQuality).
+            // extended + lossless tiers only need script support (see pickPlayQuality).
             if q == first || q == .k128
-                || ((trackQualities.contains(q) || q.isExtendedTier) && scriptQualities.contains(q)) {
+                || ((trackQualities.contains(q) || q.isExtendedTier || q == .flac24 || q == .flac)
+                    && scriptQualities.contains(q)) {
                 out.append(q)
             }
         }

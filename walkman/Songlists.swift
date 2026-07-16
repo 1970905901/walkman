@@ -308,6 +308,65 @@ nonisolated struct NetEaseSonglistService: SonglistService {
     }
 
     func fetchDetail(_ list: SonglistInfo) async throws -> SonglistDetail {
+        // 匿名调用没有任何接口能一次拿到全部曲目详情,必须两步走:
+        // 1) POST v6 接口 → 歌单元信息 + 完整 trackIds(tracks 字段匿名只回前 10 首)
+        // 2) 老批量详情接口 /api/song/detail?ids=[...] 按 100 个一组并行拉,
+        //    返回的还是 buildTrack 认识的旧字段格式(artists/album/hMusic...)。
+        guard let url = URL(string: "https://music.163.com/api/v6/playlist/detail") else {
+            return SonglistDetail(info: list, tracks: [])
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.httpBody = "id=\(list.id)&n=100000&s=8".data(using: .utf8)
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 20
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let playlist = json["playlist"] as? [String: Any] else {
+            // v6 挂了退回老接口 —— 至少能导前 10 首,不至于整单失败
+            return try await fetchDetailLegacy(list)
+        }
+        let ids = ((playlist["trackIds"] as? [[String: Any]]) ?? [])
+            .compactMap { d in d["id"].map { String(describing: $0) } }
+        let updated = SonglistInfo(
+            id: list.id, source: list.source,
+            name: (playlist["name"] as? String) ?? list.name,
+            author: ((playlist["creator"] as? [String: Any])?["nickname"] as? String) ?? list.author,
+            picURL: (playlist["coverImgUrl"] as? String) ?? list.picURL,
+            trackCount: (playlist["trackCount"] as? Int) ?? ids.count,
+            playCount: list.playCount
+        )
+        // v6 自带的 tracks 匿名只有前 10 首;短歌单已全覆盖时不用再拉第二步
+        let inline = ((playlist["tracks"] as? [[String: Any]]) ?? []).compactMap(buildTrack)
+        if !ids.isEmpty && inline.count >= ids.count {
+            return SonglistDetail(info: updated, tracks: inline)
+        }
+        // 100 个一组并行拉详情(最多 6 路并发,超大歌单别瞬间打出上百个请求),
+        // 单组失败只丢那一组;最后按 trackIds 原始顺序重排。
+        let chunks = stride(from: 0, to: ids.count, by: 100)
+            .map { Array(ids[$0..<min($0 + 100, ids.count)]) }
+        var byID: [String: Track] = [:]
+        await withTaskGroup(of: [Track].self) { group in
+            var pending = chunks.makeIterator()
+            for _ in 0..<6 {
+                guard let c = pending.next() else { break }
+                group.addTask { await self.fetchSongDetails(c) }
+            }
+            for await tracks in group {
+                for t in tracks { byID[t.songmid] = t }
+                if let c = pending.next() {
+                    group.addTask { await self.fetchSongDetails(c) }
+                }
+            }
+        }
+        let tracks = ids.compactMap { byID[$0] }
+        return SonglistDetail(info: updated, tracks: tracks.isEmpty ? inline : tracks)
+    }
+
+    /// 老接口:GET /api/playlist/detail,匿名只回前 10 首详情。仅作 v6 失败时的兜底。
+    private func fetchDetailLegacy(_ list: SonglistInfo) async throws -> SonglistDetail {
         let urlStr = "https://music.163.com/api/playlist/detail?id=\(list.id)"
         guard let url = URL(string: urlStr) else { return SonglistDetail(info: list, tracks: []) }
         var req = URLRequest(url: url)
@@ -330,6 +389,22 @@ nonisolated struct NetEaseSonglistService: SonglistService {
             playCount: list.playCount
         )
         return SonglistDetail(info: updated, tracks: tracks)
+    }
+
+    /// 批量曲目详情:/api/song/detail?ids=[id,…],一组最多 100 个。
+    /// 失败返回空数组而不是抛错 —— 调用方按组容错。
+    private func fetchSongDetails(_ ids: [String]) async -> [Track] {
+        let idsParam = "[" + ids.joined(separator: ",") + "]"
+        guard let enc = idsParam.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://music.163.com/api/song/detail?ids=\(enc)") else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 20
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let songs = json["songs"] as? [[String: Any]] else { return [] }
+        return songs.compactMap(buildTrack)
     }
 
     private func buildTrack(_ d: [String: Any]) -> Track? {
@@ -426,8 +501,11 @@ nonisolated struct QQSonglistService: SonglistService {
         let id = String(describing: tidAny)
         let creator = (d["creator_info"] as? [String: Any]) ?? (d["creator"] as? [String: Any])
         let cover = d["cover"] as? [String: Any]
-        let pic = (d["cover_url_medium"] as? String) ?? (d["cover_url_big"] as? String)
+        var pic = (d["cover_url_medium"] as? String) ?? (d["cover_url_big"] as? String)
             ?? (cover?["medium_url"] as? String) ?? (cover?["default_url"] as? String)
+        // 没有自定义封面的歌单 QQ 会返回官方默认图(绿底音符 cover_playlist.png),
+        // 当成无封面处理,让 UI 显示 App 自己的占位图,风格更统一。
+        if pic?.contains("mediastyle/global/img/cover_playlist") == true { pic = nil }
         let plays = (d["access_num"] as? Int) ?? (d["play_cnt"] as? Int) ?? 0
         return SonglistInfo(
             id: id, source: .tx,

@@ -28,7 +28,7 @@ struct IPadLeaderboardView: View {
                     LoadingPlaceholder(topPadding: 80)
                 } else {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 220), spacing: 16)],
+                        columns: [GridItem(.adaptive(minimum: 220), spacing: 16, alignment: .top)],
                         spacing: 16
                     ) {
                         ForEach(boards) { b in

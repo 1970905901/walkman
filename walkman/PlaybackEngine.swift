@@ -318,12 +318,10 @@ final class PlaybackEngine: ObservableObject {
             // A pending restore-seek only applies to the song we restored; a different song
             // means the user moved on, so drop it.
             pendingRestorePosition = nil
-        } else if let q = currentQuality {
-            // Same track re-resolving (quality cascade): record the quality that just failed.
-            // Must stay in the else-branch — on a song switch currentQuality still holds the
-            // *previous* song's quality, and inserting it here used to block the new song's
-            // cascade from ever reaching that quality.
-            triedQualities.insert(q)
+        } else {
+            // Same track re-resolving. Failed qualities are recorded at the failure sites
+            // (item .failed / libFLAC catch) — 这里不能无条件记:单曲循环、输出设备切换
+            // 等也会触发同曲重 resolve,把刚播成功的音质记成"失败"会让降级跳过它。
             // Each quality level gets its own libFLAC attempt — a lower-quality URL is a
             // different stream that may well be decodable even if the hires one wasn't.
             triedHiRes = false
@@ -408,7 +406,9 @@ final class PlaybackEngine: ObservableObject {
                 switch item.status {
                 case .readyToPlay:
                     print("[PlaybackEngine] item ready, duration=\(item.duration.seconds)")
-                    self.qualityCap = nil   // success → next time use user's preferred again
+                    // qualityCap 保持不动:同一首歌再次 resolve(单曲循环/重播)直接复用
+                    // 验证过的档位,不用从 preferred 重吃一遍 404。切歌时会重置(见
+                    // loadAndPlayCurrent 的 track-switch 分支)。
                     // Restoring a previous session: jump to where we left off, now that we can seek.
                     if let pos = self.pendingRestorePosition {
                         self.pendingRestorePosition = nil
@@ -431,18 +431,27 @@ final class PlaybackEngine: ObservableObject {
                         Task { await self.tryHiResPlayback(url: url) }
                         return
                     }
+                    // URL 级失败:音源脚本常按规则拼高音质文件名而不验证存在性,
+                    // CDN 上没这个文件就 404(-1100),vkey 无效/无权限是 403(-1102)。
+                    // 这类错误脚本调用本身是成功的,SourceManager 的降级链不会触发,
+                    // 只能在这里降一档音质重新 resolve。真正断网(-1009 等)不走这条路。
+                    let isURLErr = (nsErr?.domain == NSURLErrorDomain)
+                        && (nsErr?.code == NSURLErrorFileDoesNotExist
+                            || nsErr?.code == NSURLErrorNoPermissionsToReadFile)
                     // Cascade down to a lower quality and re-resolve — only meaningful for script
                     // sources (direct/local URLs have no resolver or alternate qualities).
-                    if isFormatErr, let track = self.currentTrack, track.source != .local,
+                    if isFormatErr || isURLErr, let track = self.currentTrack, track.source != .local,
                        let nextQ = self.nextLowerQuality(below: self.currentQuality ?? .flac24,
-                                                         supportedBy: track,
                                                          excluding: self.triedQualities) {
                         let fromQ = self.currentQuality?.displayName ?? "Hi-Res"
-                        print("[PlaybackEngine] format not supported at \(self.currentQuality?.rawValue ?? "?"), retrying at \(nextQ.rawValue)")
+                        print("[PlaybackEngine] \(isURLErr ? "URL not playable" : "format not supported") at \(self.currentQuality?.rawValue ?? "?"), retrying at \(nextQ.rawValue)")
+                        if let q = self.currentQuality { self.triedQualities.insert(q) }
                         self.qualityCap = nextQ
                         // Surface to UI so the user actually sees the cascade triggering.
                         // Uses its own field (not lastError) so loadAndPlayCurrent's reset doesn't wipe it.
-                        self.cascadeNotice = "iOS 无法解码 \(fromQ),已自动降级到 \(nextQ.displayName)"
+                        self.cascadeNotice = isURLErr
+                            ? "音源没有 \(fromQ) 的文件,已自动降级到 \(nextQ.displayName)"
+                            : "iOS 无法解码 \(fromQ),已自动降级到 \(nextQ.displayName)"
                         Task { await self.loadAndPlayCurrent() }
                         return
                     }
@@ -570,8 +579,8 @@ final class PlaybackEngine: ObservableObject {
             // can't re-fetch it; just surface the error.
             if let track = currentTrack, track.source != .local,
                let nextQ = nextLowerQuality(below: currentQuality ?? .flac24,
-                                            supportedBy: track,
                                             excluding: triedQualities) {
+                if let q = currentQuality { triedQualities.insert(q) }
                 qualityCap = nextQ
                 cascadeNotice = "Hi-Res 解码失败,已降级到 \(nextQ.displayName)"
                 await loadAndPlayCurrent()
@@ -885,15 +894,17 @@ final class PlaybackEngine: ObservableObject {
         loadLyricsForNowPlaying()
     }
 
-    /// Cascade: master → … → flac24bit → flac → 320k → 128k. Returns next quality below
-    /// `current` that the track lists and that isn't in `excluding`; if none listed, returns
-    /// the next untried cascade entry anyway (the resolver will try and either succeed or retry).
-    nonisolated func nextLowerQuality(below current: Quality, supportedBy track: Track,
+    /// Cascade: master → … → flac24bit → flac → 320k → 128k. Returns the next quality
+    /// below `current` that isn't in `excluding`, or nil at the 128k floor.
+    nonisolated func nextLowerQuality(below current: Quality,
                                       excluding tried: Set<Quality> = []) -> Quality? {
         let cascade: [Quality] = Quality.ranked
         guard let idx = cascade.firstIndex(of: current), idx + 1 < cascade.count else { return nil }
         let candidates = cascade[(idx + 1)...].filter { !tried.contains($0) }
-        return candidates.first { track.qualities.contains($0) } ?? candidates.first
+        // 只降一档:这里不做可用性判断(元数据经常漏标无损档,见 pickPlayQuality),
+        // 交给 resolve 时的 pickPlayQuality 按脚本能力挑 cap 之下真正可用的档位 ——
+        // 那一步是本地判断,不花网络请求;真不存在的档位 404 后会继续往下走。
+        return candidates.first
     }
 }
 

@@ -195,7 +195,7 @@ struct IPadLibraryView: View {
         VStack(alignment: .leading, spacing: 14) {
             IPadSectionHeader("我的歌单", subtitle: "\(playlists.playlists.count) 个")
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 160), spacing: 18)],
+                columns: [GridItem(.adaptive(minimum: 160), spacing: 18, alignment: .top)],
                 spacing: 24
             ) {
                 ForEach(playlists.playlists) { p in

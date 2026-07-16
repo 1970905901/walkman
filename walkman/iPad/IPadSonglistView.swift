@@ -58,7 +58,7 @@ struct IPadSonglistView: View {
                         .padding(.top, 60)
                 } else {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 190), spacing: 18)],
+                        columns: [GridItem(.adaptive(minimum: 190), spacing: 18, alignment: .top)],
                         spacing: 22
                     ) {
                         ForEach(playlists) { list in

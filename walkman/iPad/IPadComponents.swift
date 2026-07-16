@@ -197,7 +197,10 @@ struct IPadAlbumCard: View {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(DS.Palette.textPrimary)
-                .lineLimit(2)
+                // reservesSpace:一行标题也占满两行的高度,网格/carousel 里相邻卡片
+                // 的封面和播放量行才能对齐 —— 否则单行标题的卡片整体矮一截,
+                // 在默认垂直居中的 LazyVGrid 单元格里会往下沉、看起来没对齐。
+                .lineLimit(2, reservesSpace: true)
                 .frame(width: size, alignment: .leading)
             if let subtitle {
                 Text(subtitle)
