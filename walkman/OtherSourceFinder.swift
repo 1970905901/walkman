@@ -1,9 +1,9 @@
 import Foundation
 
 /// Implements lx-music-mobile's "换源播放" (cross-source fallback) mechanism.
-/// Mirrors `findMusic` + `getOnlineOtherSourceMusicUrl` in
-///   /Users/allen/Downloads/lx-music-mobile/src/utils/musicSdk/index.js
-///   /Users/allen/Downloads/lx-music-mobile/src/core/music/utils.ts
+/// Mirrors `findMusic` + `getOnlineOtherSourceMusicUrl` in lx-music-mobile:
+///   src/utils/musicSdk/index.js
+///   src/core/music/utils.ts
 ///
 /// When the script can't resolve a song on its native source (e.g. mg has no backend support,
 /// or kg has a song not in the API server), we search the same name+singer on every OTHER

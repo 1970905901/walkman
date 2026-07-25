@@ -67,3 +67,7 @@ iOSInjectionProject/
 # Claude (assistant local state — do not commit)
 .claude/
 claude.info
+
+# Coverage / profiling artifacts
+*.profraw
+*.profdata

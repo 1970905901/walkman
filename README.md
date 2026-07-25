@@ -193,4 +193,13 @@ bash dmg/build-dmg.sh
 
 ## 📄 License
 
-[Apache License 2.0](LICENSE)
+本项目采用 [Apache License 2.0](LICENSE)。
+
+### 第三方组件
+
+| 组件 | 用途 | 许可 |
+|---|---|---|
+| [libFLAC](https://xiph.org/flac/) (Xiph.Org) | Hi-Res FLAC 解码兜底，位于 `walkman/Frameworks/libflac/` | [BSD 3-Clause](walkman/Frameworks/libflac/COPYING.Xiph) |
+| [lx-music](https://github.com/lyswhut/lx-music-mobile) 用户脚本协议 | `walkman/Resources/user-api-preload.js` 复刻其 v4 脚本契约 | Apache-2.0 |
+
+仅内置 BSD 许可的 libFLAC 解码库，**不包含** GPL 许可的 FLAC 命令行工具。完整声明见 [NOTICE](NOTICE)。
