@@ -71,3 +71,6 @@ claude.info
 # Coverage / profiling artifacts
 *.profraw
 *.profdata
+
+# 本地签名配置（含 Team ID，不入库）
+Config/Local.xcconfig
