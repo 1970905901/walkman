@@ -6,8 +6,16 @@ final class PlaylistStore: ObservableObject {
     @Published private(set) var playlists: [PlaylistMeta] = []
     @Published private(set) var trackBank: [String: Track] = [:]
 
+    /// 已删除歌单的墓碑:歌单 id → 删除时间。
+    /// 删除必须显式记录并同步 —— 否则其它设备上仍存在的副本会在下一次
+    /// pullFromCloud 里被当作"本地缺失的远端歌单"重新加回来,表现为
+    /// 删掉的歌单过一阵自己回来。超过 tombstoneTTL 的墓碑会被清理。
+    private var tombstones: [String: Date] = [:]
+    private static let tombstoneTTL: TimeInterval = 180 * 24 * 3600
+
     private let playlistsURL: URL
     private let trackBankURL: URL
+    private let tombstonesURL: URL
 
     private var cloudCancellable: AnyCancellable?
 
@@ -15,10 +23,12 @@ final class PlaylistStore: ObservableObject {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         self.playlistsURL = dir.appendingPathComponent("playlists.json")
         self.trackBankURL = dir.appendingPathComponent("trackBank.json")
+        self.tombstonesURL = dir.appendingPathComponent("deletedPlaylists.json")
         load()
         if playlists.isEmpty {
             if let remote: [PlaylistMeta] = CloudSync.shared.pull([PlaylistMeta].self, forKey: CloudSync.Keys.playlists) {
-                playlists = remote
+                // 首次装机也要过一遍墓碑,否则云端残留的已删歌单会在新设备复活
+                playlists = applyingTombstones(to: remote)
             }
             if let bank: [String: Track] = CloudSync.shared.pull([String: Track].self, forKey: CloudSync.Keys.trackBank) {
                 trackBank = bank
@@ -60,8 +70,35 @@ final class PlaylistStore: ObservableObject {
         playlists = deduped
     }
 
+    /// 丢掉 list 里已被墓碑标记的歌单。
+    /// 墓碑时间早于歌单 updatedAt 时保留 —— 说明删除之后又有设备改过它
+    /// (加了歌等),按 last-writer-wins 让修改赢,避免误删有效数据。
+    private func applyingTombstones(to list: [PlaylistMeta]) -> [PlaylistMeta] {
+        guard !tombstones.isEmpty else { return list }
+        return list.filter { p in
+            guard let deletedAt = tombstones[p.id.uuidString] else { return true }
+            return p.updatedAt > deletedAt
+        }
+    }
+
+    private func pruneTombstones() {
+        let cutoff = Date().addingTimeInterval(-Self.tombstoneTTL)
+        tombstones = tombstones.filter { $0.value > cutoff }
+    }
+
     private func pullFromCloud() {
-        if let remote: [PlaylistMeta] = CloudSync.shared.pull([PlaylistMeta].self, forKey: CloudSync.Keys.playlists) {
+        // 先合并墓碑:两端的删除记录取并集、同 id 取较晚的时间。
+        // 必须在合并歌单之前做,这样远端的删除也能落到本地。
+        if let remoteTombs: [String: Date] = CloudSync.shared.pull([String: Date].self, forKey: CloudSync.Keys.deletedPlaylists) {
+            tombstones.merge(remoteTombs) { local, remote in max(local, remote) }
+        }
+        pruneTombstones()
+        // 远端删除的歌单,本地也要删掉(除非本地在删除之后改过它)
+        let survivors = applyingTombstones(to: playlists)
+        if survivors.count != playlists.count {
+            playlists = survivors
+        }
+        if let remote: [PlaylistMeta] = CloudSync.shared.pull([PlaylistMeta].self, forKey: CloudSync.Keys.playlists).map(applyingTombstones(to:)) {
             // 合并:同名歌单当成同一个,避免各端 init 时本地默认创建的
             // "我喜欢的" 跟从其它设备同步过来的 "我喜欢的" 出现两条。
             //   1. 先按 UUID 直接匹配 — 取 updatedAt 较新的
@@ -151,6 +188,8 @@ final class PlaylistStore: ObservableObject {
 
     func deletePlaylist(_ id: UUID) {
         playlists.removeAll { $0.id == id }
+        // 记下墓碑并同步出去,否则别的设备会把它当新歌单推回来
+        tombstones[id.uuidString] = Date()
         save()
         cleanTrackBank()
     }
@@ -177,6 +216,10 @@ final class PlaylistStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([String: Track].self, from: data) {
             trackBank = decoded
         }
+        if let data = try? Data(contentsOf: tombstonesURL),
+           let decoded = try? JSONDecoder().decode([String: Date].self, from: data) {
+            tombstones = decoded
+        }
     }
 
     private func save(skipCloud: Bool = false) {
@@ -186,10 +229,27 @@ final class PlaylistStore: ObservableObject {
         if let data = try? JSONEncoder().encode(trackBank) {
             try? data.write(to: trackBankURL, options: .atomic)
         }
+        if let data = try? JSONEncoder().encode(tombstones) {
+            try? data.write(to: tombstonesURL, options: .atomic)
+        }
         if !skipCloud {
             // 本地文件夹导入的歌(lf://)的 bookmark 只在本机有效,同步到其它设备
             // 也播不了,所以歌曲和纯本地歌单都不上云。
-            let cloudBank = trackBank.filter { !isLocalImport($0.key) }
+            var cloudBank = trackBank.filter { !isLocalImport($0.key) }
+            // 云端已有的曲目要保住:push 是整体覆盖,如果这台设备的 trackBank
+            // 不全(曾经超限没同步到、或刚装机还没拉全),直接推自己的那份会把
+            // 别的设备存进去的曲目抹掉 —— 歌单里的 id 还在、歌没了,就成了
+            // "有名字有数量、点进去空白"的幽灵歌单。所以先并上云端现有的。
+            if let remoteBank: [String: Track] = CloudSync.shared.pull([String: Track].self, forKey: CloudSync.Keys.trackBank) {
+                cloudBank.merge(remoteBank) { local, _ in local }
+            }
+            // 再把没人引用的曲目剪掉,免得云端 1MB 配额被已删歌单的残留吃满。
+            // 引用集必须算上云端歌单 —— 别的设备刚建的歌单本地还没拉到,
+            // 只按本地引用剪会把它的歌删掉,又变成幽灵歌单。
+            let remotePlaylists: [PlaylistMeta] = CloudSync.shared.pull([PlaylistMeta].self, forKey: CloudSync.Keys.playlists) ?? []
+            let referenced = Set(playlists.flatMap { $0.trackIDs })
+                .union(applyingTombstones(to: remotePlaylists).flatMap { $0.trackIDs })
+            cloudBank = cloudBank.filter { referenced.contains($0.key) }
             let cloudPlaylists: [PlaylistMeta] = playlists.compactMap { p in
                 var copy = p
                 copy.trackIDs = p.trackIDs.filter { !isLocalImport($0) }
@@ -198,6 +258,7 @@ final class PlaylistStore: ObservableObject {
             }
             CloudSync.shared.push(cloudPlaylists, forKey: CloudSync.Keys.playlists)
             CloudSync.shared.push(cloudBank, forKey: CloudSync.Keys.trackBank)
+            CloudSync.shared.push(tombstones, forKey: CloudSync.Keys.deletedPlaylists)
         }
     }
 
