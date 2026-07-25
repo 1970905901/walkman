@@ -163,6 +163,34 @@ scripts/       历史下载迁移脚本（仅 Mac）
 
 环境：**Xcode 26**（iOS 26 SDK）。工程使用 Xcode 16+ 的同步文件夹（`PBXFileSystemSynchronizedRootGroup`），增删文件无需手改 pbxproj。
 
+### 1. 配置签名（真机 / Mac 必需，模拟器可跳过）
+
+仓库里**不含任何开发者身份信息**，`DEVELOPMENT_TEAM` 由一个被 gitignore 的本地文件提供：
+
+```bash
+cp Config/Local.xcconfig.example Config/Local.xcconfig
+# 编辑它，填入你自己的 Team ID（developer.apple.com → Membership，10 位）
+```
+
+不配置也能打开工程和编译模拟器版本，只是签名那步会提示要选开发团队。
+
+### 2. 改成你自己的 Bundle ID
+
+工程里的 `com.heartbeat.walkman` 系列 ID 绑定在原作者账号下，**你必须换成自己的**，否则签名会失败。在 Xcode 里对四个 target 各改一次（app / Widget / Tests / UITests），或全局替换 `com.heartbeat.walkman` 为你的前缀。同时 `walkman/walkman.entitlements` 与 `WalkmanWidgetExtension.entitlements` 里的 App Group `group.com.heartbeat.walkman` 也要一并改（Widget 与主 App 靠它共享数据）。
+
+### 3. 按需开关 Capability
+
+免费开发者账号拿不到部分能力，遇到签名报错时可在 Signing & Capabilities 里删掉对应项再编译，功能会相应失效但不影响主体：
+
+| Capability | 作用 | 去掉的后果 |
+|---|---|---|
+| iCloud (Key-Value storage) | 歌单/脚本多端同步 | 仅本地保存 |
+| App Groups | Widget 与主 App 共享数据 | Widget 不显示内容 |
+| Siri | 语音点歌、快捷指令 | Siri 相关功能失效 |
+| Push Notifications | 预留 | 无影响 |
+
+### 4. 编译
+
 ```bash
 # iOS 模拟器
 xcodebuild -project walkman.xcodeproj -scheme walkman \
@@ -172,6 +200,8 @@ xcodebuild -project walkman.xcodeproj -scheme walkman \
 xcodebuild -project walkman.xcodeproj -scheme walkman \
   -destination 'platform=macOS,variant=Mac Catalyst' build
 ```
+
+> 提示：在 Xcode 图形界面改过 Signing & Capabilities 后，Xcode 会把 `DEVELOPMENT_TEAM` 写回 `project.pbxproj`。提交前请 `git diff` 检查一下，别把自己的 Team ID 带进版本库。
 
 Mac DMG 打包：
 
