@@ -9,9 +9,14 @@ final class PlaylistStore: ObservableObject {
     /// 已删除歌单的墓碑:歌单 id → 删除时间。
     /// 删除必须显式记录并同步 —— 否则其它设备上仍存在的副本会在下一次
     /// pullFromCloud 里被当作"本地缺失的远端歌单"重新加回来,表现为
-    /// 删掉的歌单过一阵自己回来。超过 tombstoneTTL 的墓碑会被清理。
+    /// 删掉的歌单过一阵自己回来。
+    ///
+    /// 按条数封顶而不是按时间过期:墓碑要压住的是"某台设备离线很久、回来时
+    /// 还揣着旧副本"的情况,按时间清理等于赌设备最长闲置多久 —— 抽屉里的
+    /// iPad 放半年很常见,过期了这个 bug 就会重现。一条墓碑实测约 56 字节,
+    /// 200 条约 11KB,只占 iCloud KV 1MB 配额的 1%,留着比清掉划算得多。
     private var tombstones: [String: Date] = [:]
-    private static let tombstoneTTL: TimeInterval = 180 * 24 * 3600
+    private static let maxTombstones = 200
 
     private let playlistsURL: URL
     private let trackBankURL: URL
@@ -81,9 +86,12 @@ final class PlaylistStore: ObservableObject {
         }
     }
 
+    /// 只保留最近的 maxTombstones 条 —— 删得再多也不会撑爆云端配额,
+    /// 而正常使用下(删过的歌单远少于 200 个)墓碑等同于永不过期。
     private func pruneTombstones() {
-        let cutoff = Date().addingTimeInterval(-Self.tombstoneTTL)
-        tombstones = tombstones.filter { $0.value > cutoff }
+        guard tombstones.count > Self.maxTombstones else { return }
+        let keep = tombstones.sorted { $0.value > $1.value }.prefix(Self.maxTombstones)
+        tombstones = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
     }
 
     private func pullFromCloud() {
