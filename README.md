@@ -163,16 +163,9 @@ scripts/       历史下载迁移脚本（仅 Mac）
 
 环境：**Xcode 26**（iOS 26 SDK）。工程使用 Xcode 16+ 的同步文件夹（`PBXFileSystemSynchronizedRootGroup`），增删文件无需手改 pbxproj。
 
-### 1. 配置签名（真机 / Mac 必需，模拟器可跳过）
+### 1. 换成你自己的签名团队（真机 / Mac 必需，模拟器可跳过）
 
-仓库里**不含任何开发者身份信息**，`DEVELOPMENT_TEAM` 由一个被 gitignore 的本地文件提供：
-
-```bash
-cp Config/Local.xcconfig.example Config/Local.xcconfig
-# 编辑它，填入你自己的 Team ID（developer.apple.com → Membership，10 位）
-```
-
-不配置也能打开工程和编译模拟器版本，只是签名那步会提示要选开发团队。
+工程里预置的 `DEVELOPMENT_TEAM` 是原作者的，你**没有**该团队的账号，直接编译会报 `No account for team ...`。在 Xcode 里打开 **Signing & Capabilities**，勾选 Automatically manage signing，把 Team 换成你自己的 Apple ID 即可（免费账号也行，7 天需重签）。四个 target（app / Widget / Tests / UITests）各改一次。
 
 ### 2. 改成你自己的 Bundle ID
 
@@ -201,7 +194,7 @@ xcodebuild -project walkman.xcodeproj -scheme walkman \
   -destination 'platform=macOS,variant=Mac Catalyst' build
 ```
 
-> 提示：在 Xcode 图形界面改过 Signing & Capabilities 后，Xcode 会把 `DEVELOPMENT_TEAM` 写回 `project.pbxproj`。提交前请 `git diff` 检查一下，别把自己的 Team ID 带进版本库。
+> 提示：改过签名设置后 `project.pbxproj` 会带上你自己的 Team ID 和 Bundle ID。如果打算提 PR，记得把这些本地改动排除掉，别混进提交里。
 
 Mac DMG 打包：
 

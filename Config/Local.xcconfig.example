@@ -1,4 +1,0 @@
-// 复制本文件为 Local.xcconfig（同目录），填入你自己的 Apple Developer Team ID。
-// Team ID 在 https://developer.apple.com/account → Membership 里，10 位大写字母数字。
-// Local.xcconfig 已被 .gitignore 忽略，不会进入版本库。
-DEVELOPMENT_TEAM = ABCDE12345
