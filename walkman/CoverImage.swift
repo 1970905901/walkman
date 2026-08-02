@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import ImageIO
 import UIKit
 
@@ -12,6 +13,13 @@ import UIKit
 // 各家封面 CDN 都返回 Cache-Control: max-age 与 Last-Modified,并正确响应
 // If-Modified-Since(实测 gtimg / qpic 均回 304),所以过期重新校验、封面换图后
 // 自动更新这些语义由 URLSession 按 HTTP 规范处理,比自己发明一套失效规则可靠。
+
+/// 缓存有新图落地时发个信号,让正在显示占位图的封面视图重新取一次。
+final class CoverCacheSignal: ObservableObject {
+    static let shared = CoverCacheSignal()
+    @Published private(set) var version = 0
+    func bump() { version &+= 1 }
+}
 
 enum CoverImageCache {
 
@@ -34,12 +42,29 @@ enum CoverImageCache {
         return memory.object(forKey: key(url, maxPixel))
     }
 
-    /// 未命中时读取 + 按目标尺寸解码。网络走 URLSession(自动吃 URLCache),
+    /// 正在下载中的图。多个视图要同一张图时共用一个任务,更重要的是:
+    /// 这个任务是**脱离视图生命周期**的 —— 视图被重建/滚走导致 .task 取消时,
+    /// 下载不会跟着夭折,结果照样进缓存,下次渲染同步就能拿到。
+    /// (标签栏配件位里的迷你播放器会被系统反复重建,没有这层就永远加载不完。)
+    private static var inFlight: [NSString: Task<UIImage?, Never>] = [:]
+
+    static func load(_ url: String?, maxPixel: CGFloat) async -> UIImage? {
+        guard let url else { return nil }
+        if let hit = cached(url, maxPixel: maxPixel) { return hit }
+        let k = key(url, maxPixel)
+        if let running = inFlight[k] { return await running.value }
+        let task = Task<UIImage?, Never> { await fetch(url, maxPixel: maxPixel) }
+        inFlight[k] = task
+        let result = await task.value
+        inFlight.removeValue(forKey: k)
+        return result
+    }
+
+    /// 实际读取 + 按目标尺寸解码。网络走 URLSession(自动吃 URLCache),
     /// 本地文件直接读盘 —— 已下载歌曲的封面是 file:// (见 DownloadStore
     /// .displayCoverURL),它的响应不是 HTTPURLResponse,不能按网络那套判断。
-    static func load(_ url: String?, maxPixel: CGFloat) async -> UIImage? {
-        guard let url, let source = URL(string: url) else { return nil }
-        if let hit = cached(url, maxPixel: maxPixel) { return hit }
+    private static func fetch(_ url: String, maxPixel: CGFloat) async -> UIImage? {
+        guard let source = URL(string: url) else { return nil }
         let data: Data?
         if source.isFileURL {
             data = try? Data(contentsOf: source, options: .mappedIfSafe)
@@ -57,6 +82,10 @@ enum CoverImageCache {
         }
         guard let data, let image = downsample(data, maxPixel: maxPixel) else { return nil }
         memory.setObject(image, forKey: key(url, maxPixel), cost: cost(of: image))
+        // 通知在显示中的封面视图:缓存里多了一张图,该重新取一次了。
+        // 有些宿主环境(标签栏配件位)不会执行 .task,拿不到异步结果,只能靠
+        // 这个信号驱动重绘 + 同步读缓存。
+        CoverCacheSignal.shared.bump()
         return image
     }
 
@@ -187,6 +216,8 @@ struct CoverImage<Content: View, Placeholder: View>: View {
     /// 播放页的封面视图身份是稳定的(切歌不重建),所以不能只靠 url 变化驱动。
     @State private var retryToken = 0
     @Environment(\.scenePhase) private var scenePhase
+    /// 缓存有新图落地就重绘一次,配合 body 里的同步兜底取图
+    @ObservedObject private var cacheSignal = CoverCacheSignal.shared
 
     init(url: String?,
          maxPixel: CGFloat,
@@ -202,9 +233,12 @@ struct CoverImage<Content: View, Placeholder: View>: View {
     }
 
     var body: some View {
-        Group {
-            if let image {
-                content(Image(uiImage: image))
+        // 每次重绘都同步兜底查一次缓存:标签栏配件位这类宿主不执行 .task,
+        // @State 永远拿不到异步结果,只能靠 signal 触发重绘后从缓存里取。
+        let shown = image ?? CoverImageCache.cached(url, maxPixel: maxPixel)
+        return Group {
+            if let shown {
+                content(Image(uiImage: shown))
             } else {
                 placeholder()
             }
@@ -213,6 +247,12 @@ struct CoverImage<Content: View, Placeholder: View>: View {
         // SwiftUI 会自动取消上一个,不会出现两个任务竞争写同一个 @State。
         .task(id: "\(url ?? "")|\(retryToken)") {
             await load()
+        }
+        // .task 不执行的宿主环境靠这条兜底:onChange 跟着 body 求值走,
+        // 起一个脱离视图生命周期的任务去下载,下完由 signal 驱动重绘。
+        .onChange(of: url, initial: true) { _, newURL in
+            guard CoverImageCache.cached(newURL, maxPixel: maxPixel) == nil else { return }
+            Task { _ = await CoverImageCache.load(newURL, maxPixel: maxPixel) }
         }
         .onChange(of: scenePhase) { _, phase in
             // 后台期间任务会被取消,回前台时如果还是占位图就再试一次 ——
@@ -231,9 +271,20 @@ struct CoverImage<Content: View, Placeholder: View>: View {
             return
         }
         image = nil
-        let loaded = await CoverImageCache.load(url, maxPixel: maxPixel)
-        // 被取消说明 url 已经换了或视图没了,这次结果作废
-        guard !Task.isCancelled else { return }
-        image = loaded
+        // 失败自动重试:冷启动那一下网络还没就绪(尤其是恢复上次播放时立刻
+        // 出现的迷你播放器),第一次请求经常空手而归。没有重试的话这张图就
+        // 永远停在占位状态 —— url 不变,任务不会再跑。
+        for delay in [0.0, 1.5, 4.0] {
+            if delay > 0 {
+                try? await Task.sleep(for: .seconds(delay))
+            }
+            // 被取消说明 url 换了或视图没了,这次结果作废
+            guard !Task.isCancelled else { return }
+            if let loaded = await CoverImageCache.load(url, maxPixel: maxPixel) {
+                guard !Task.isCancelled else { return }
+                image = loaded
+                return
+            }
+        }
     }
 }

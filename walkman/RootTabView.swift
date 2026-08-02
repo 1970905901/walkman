@@ -126,21 +126,26 @@ struct RootTabView: View {
     private var phoneTabs: some View {
         TabView(selection: $activeTab) {
             NavigationStack(path: $searchPath) { SearchView() }
-                .miniPlayerInset()
                 .tabItem { Label(WalkmanSection.search.title, systemImage: WalkmanSection.search.systemImage) }
                 .tag(WalkmanSection.search.tag)
             NavigationStack(path: $leaderboardPath) { LeaderboardView() }
-                .miniPlayerInset()
                 .tabItem { Label(WalkmanSection.leaderboard.title, systemImage: WalkmanSection.leaderboard.systemImage) }
                 .tag(WalkmanSection.leaderboard.tag)
             NavigationStack(path: $songlistPath) { SonglistView() }
-                .miniPlayerInset()
                 .tabItem { Label(WalkmanSection.songlist.title, systemImage: WalkmanSection.songlist.systemImage) }
                 .tag(WalkmanSection.songlist.tag)
             NavigationStack(path: $libraryPath) { LibraryView() }
-                .miniPlayerInset()
                 .tabItem { Label(WalkmanSection.library.title, systemImage: WalkmanSection.library.systemImage) }
                 .tag(WalkmanSection.library.tag)
+        }
+        // 迷你播放器交给系统的标签栏配件位(iOS 26)。之前是自己在 ZStack 里浮一层
+        // overlay,overlay 不参与布局,列表最后一行会被压住;在 NavigationStack 上
+        // 补 safeAreaInset 实测也不生效(栈内的滚动视图拿不到这层安全区)。
+        // 用原生配件位则由系统负责排布与内容避让,和 Apple Music 的行为一致。
+        .tabViewBottomAccessory {
+            if playback.currentTrack != nil {
+                MiniPlayer(onTap: openPlayer)
+            }
         }
     }
 
@@ -148,16 +153,8 @@ struct RootTabView: View {
 
     @ViewBuilder
     private var overlays: some View {
-        // iPhone-only floating MiniPlayer. iPad/Mac use a full-width bottom
-        // bar (IPadBottomBar) rendered inside IPadRootView, so a floating
-        // overlay here would just stack on top of it and look duplicated.
-        if playback.currentTrack != nil, hSize == .compact, !isCatalyst {
-            MiniPlayer(onTap: openPlayer)
-                .padding(.bottom, 50)
-                .transition(.move(edge: .bottom))
-                .opacity(showPlayer ? 0 : 1)
-                .animation(.spring(duration: 0.3), value: playback.currentTrack?.id)
-        }
+        // iPhone 的 MiniPlayer 现在挂在 TabView 的原生配件位上(见 phoneTabs),
+        // 不再是这里的浮层。iPad/Mac 有自己的 IPadBottomBar,同样不走这里。
         if let err = playback.lastError {
             ErrorBanner(text: err, tone: .warning) { playback.lastError = nil }
                 .padding(.bottom, playback.currentTrack != nil ? 110 : 60)
