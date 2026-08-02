@@ -32,6 +32,12 @@ struct walkmanApp: App {
 
     init() {
         AppNavBarAppearance.applyDefault()
+        // 封面/接口响应的 HTTP 缓存 —— 系统默认只有 500KB 内存 + 19MB 磁盘,
+        // 一屏歌单网格就能把它冲干净,于是每次进界面都得重新联网,封面先空一下。
+        // 必须在任何 URLSession 用起来之前替换。磁盘层由它按 HTTP 语义管理
+        // (max-age 过期后带 If-Modified-Since 重新校验),封面换图会自动更新。
+        URLCache.shared = URLCache(memoryCapacity: 32 * 1024 * 1024,
+                                   diskCapacity: 256 * 1024 * 1024)
         // Stores are built here (not as inline @StateObject defaults) so they
         // can be registered into AppServices during a background launch —
         // Siri AudioPlaybackIntents run App.init but never connect a scene,

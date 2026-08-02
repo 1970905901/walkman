@@ -10,6 +10,10 @@ import UIKit
 /// evict; the container is small (just covers) and iOS reclaims it on uninstall.
 enum CoverCache {
 
+    /// 本地封面的有效期。跟各家 CDN 给的 Cache-Control: max-age(30 天)对齐;
+    /// 过期后重新拉一次,专辑换封面才不会一直停在旧图。
+    private static let ttl: TimeInterval = 30 * 24 * 3600
+
     /// Returns the local file URL for a remote cover, downloading if missing.
     /// Returns `nil` if the URL is bad, the network failed, or the App Group
     /// container isn't reachable.
@@ -20,8 +24,13 @@ enum CoverCache {
             return nil
         }
         let local = directory.appendingPathComponent(filename(for: urlString))
+        // 本地副本在 TTL 内直接用;过期就重新下载一次,这样平台真给专辑换了封面
+        // 也能跟上 —— 之前只判断文件存在,一旦落盘就永远不会更新了。
         if FileManager.default.fileExists(atPath: local.path) {
-            return local
+            let modified = (try? local.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, Date().timeIntervalSince(modified) < ttl {
+                return local
+            }
         }
         do {
             let (data, response) = try await URLSession.shared.data(from: remote)

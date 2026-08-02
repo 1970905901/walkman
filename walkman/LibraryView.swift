@@ -271,11 +271,10 @@ struct CoverMosaic: View {
 
     @ViewBuilder
     private func cover(_ url: String?, size: CGFloat) -> some View {
-        AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
-            switch phase {
-            case .success(let img): img.resizable().scaledToFill().frame(width: size, height: size).clipped()
-            default: placeholder.frame(width: size, height: size)
-            }
+        CoverImage(url: url, maxPixel: size) { img in
+            img.resizable().scaledToFill().frame(width: size, height: size).clipped()
+        } placeholder: {
+            placeholder.frame(width: size, height: size)
         }
     }
 
@@ -498,11 +497,10 @@ private struct CoverMosaicCompact: View {
 
     @ViewBuilder
     private func cover(_ url: String?, size: CGFloat) -> some View {
-        AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
-            switch phase {
-            case .success(let img): img.resizable().scaledToFill().frame(width: size, height: size).clipped()
-            default: Color(.tertiarySystemFill).frame(width: size, height: size)
-            }
+        CoverImage(url: url, maxPixel: size) { img in
+            img.resizable().scaledToFill().frame(width: size, height: size).clipped()
+        } placeholder: {
+            Color(.tertiarySystemFill).frame(width: size, height: size)
         }
     }
 }

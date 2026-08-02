@@ -297,21 +297,18 @@ struct Artwork: View {
     var radius: CGFloat = DS.Radius.small
 
     var body: some View {
-        AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
-            switch phase {
-            case .success(let img):
-                img.resizable().scaledToFill()
-            default:
-                LinearGradient(
-                    colors: [Color(.tertiarySystemFill), Color(.quaternarySystemFill)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                )
-                .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: size * 0.4, weight: .medium))
-                        .foregroundColor(.secondary)
-                )
-            }
+        CoverImage(url: url, maxPixel: size) { img in
+            img.resizable().scaledToFill()
+        } placeholder: {
+            LinearGradient(
+                colors: [Color(.tertiarySystemFill), Color(.quaternarySystemFill)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .overlay(
+                Image(systemName: "music.note")
+                    .font(.system(size: size * 0.4, weight: .medium))
+                    .foregroundColor(.secondary)
+            )
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))

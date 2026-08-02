@@ -69,19 +69,17 @@ private struct BoardThumbnail: View {
     let board: BoardInfo
     var size: CGFloat = 56
     var body: some View {
-        AsyncImage(url: board.picURL.flatMap(URL.init(string:))) { phase in
-            switch phase {
-            case .success(let img): img.resizable().scaledToFill()
-            default:
-                LinearGradient(colors: [board.source.tint, board.source.tint.opacity(0.55)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                .overlay(
-                    Text(String(board.name.prefix(2)))
-                        .font(.system(size: size * 0.25, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1).minimumScaleFactor(0.5)
-                )
-            }
+        CoverImage(url: board.picURL, maxPixel: size) { img in
+            img.resizable().scaledToFill()
+        } placeholder: {
+            LinearGradient(colors: [board.source.tint, board.source.tint.opacity(0.55)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay(
+                Text(String(board.name.prefix(2)))
+                    .font(.system(size: size * 0.25, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1).minimumScaleFactor(0.5)
+            )
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))

@@ -152,8 +152,8 @@ struct IPadVinylDisc: View {
     // MARK: - Center Cover (中心封面)
     private var cover: some View {
         Group {
-            if let urlStr = imageURL, let url = URL(string: urlStr) {
-                AsyncImage(url: url) { img in
+            if let urlStr = imageURL {
+                CoverImage(url: urlStr, maxPixel: coverSize) { img in
                     img.resizable().scaledToFill()
                 } placeholder: {
                     coverPlaceholder

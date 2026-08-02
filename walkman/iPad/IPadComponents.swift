@@ -86,8 +86,9 @@ struct IPadHeroBanner: View {
             // Background: angled gradient with optional blurred cover behind.
             LinearGradient(colors: [accentStart, accentEnd],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
-            if let imageURL, let u = URL(string: imageURL) {
-                AsyncImage(url: u) { img in
+            if let imageURL {
+                // 背景虚化层,28pt 模糊 —— 小图足够,别为它拉原图
+                CoverImage(url: imageURL, maxPixel: 120) { img in
                     img.resizable().scaledToFill()
                 } placeholder: { Color.clear }
                 .opacity(0.32)
@@ -118,8 +119,8 @@ struct IPadHeroBanner: View {
                     .buttonStyle(.plain)
                 }
                 Spacer(minLength: 12)
-                if let imageURL, let u = URL(string: imageURL) {
-                    AsyncImage(url: u) { img in
+                if let imageURL {
+                    CoverImage(url: imageURL, maxPixel: 220) { img in
                         img.resizable().scaledToFill()
                     } placeholder: {
                         LinearGradient(colors: [.white.opacity(0.2), .white.opacity(0.05)],
@@ -156,19 +157,13 @@ struct IPadAlbumCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack {
-                if let imageURL, let u = URL(string: imageURL) {
-                    AsyncImage(url: u) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                        case .failure, .empty:
-                            // failure 是 URL 加载错误(404/超时/被劫持),empty 是
-                            // loading 中 — 都用同一个 placeholder 兜底,避免 4xx
-                            // 之后留一个空白方块
-                            placeholder
-                        @unknown default:
-                            placeholder
-                        }
+                if let imageURL {
+                    // 加载失败(404/超时/被劫持)与加载中共用同一个 placeholder,
+                    // 避免 4xx 之后留一个空白方块
+                    CoverImage(url: imageURL, maxPixel: size) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: {
+                        placeholder
                     }
                 } else {
                     placeholder

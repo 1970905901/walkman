@@ -277,14 +277,12 @@ private struct SonglistCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topTrailing) {
-                AsyncImage(url: info.picURL.flatMap(URL.init(string:))) { phase in
-                    switch phase {
-                    case .success(let img): img.resizable().scaledToFill()
-                    default:
-                        LinearGradient(colors: [info.source.tint, info.source.tint.opacity(0.45)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing)
-                            .overlay(Image(systemName: "music.note.list").font(.system(size: 30)).foregroundColor(.white))
-                    }
+                CoverImage(url: info.picURL, maxPixel: 180) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    LinearGradient(colors: [info.source.tint, info.source.tint.opacity(0.45)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .overlay(Image(systemName: "music.note.list").font(.system(size: 30)).foregroundColor(.white))
                 }
                 .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous))
@@ -438,14 +436,12 @@ struct SonglistDetailView: View {
     @ViewBuilder
     private func header(detail: SonglistDetail) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            AsyncImage(url: detail.info.picURL.flatMap(URL.init(string:))) { phase in
-                switch phase {
-                case .success(let img): img.resizable().scaledToFill()
-                default:
-                    LinearGradient(colors: [info.source.tint, info.source.tint.opacity(0.5)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .overlay(Image(systemName: "music.note.list").font(.system(size: 36)).foregroundColor(.white))
-                }
+            CoverImage(url: detail.info.picURL, maxPixel: 110) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                LinearGradient(colors: [info.source.tint, info.source.tint.opacity(0.5)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .overlay(Image(systemName: "music.note.list").font(.system(size: 36)).foregroundColor(.white))
             }
             .frame(width: 110, height: 110)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.medium, style: .continuous))

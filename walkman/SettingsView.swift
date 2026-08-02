@@ -4,6 +4,8 @@ struct SettingsView: View {
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var sources: SourceManager
     @ObservedObject private var cloud = CloudSync.shared
+    /// 进页面时算一次即可 —— 统计磁盘占用要遍历目录,不适合每次刷新都做
+    @State private var cacheSize = 0
 
     // 辅助编译期环境判断
     private var isMacCatalyst: Bool {
@@ -131,6 +133,26 @@ struct SettingsView: View {
                 Text("开启后,播放时会显示「换源播放」「音质降级」「使用内置 Hi-Res 解码」等提示横幅。真正的播放错误始终显示,不受此开关影响")
             }
 
+            Section {
+                HStack {
+                    Text("已用空间")
+                    Spacer()
+                    Text(AppCache.formatted(cacheSize))
+                        .foregroundColor(.secondary).font(.caption).monospacedDigit()
+                }
+                Button(role: .destructive) {
+                    AppCache.clear()
+                    cacheSize = AppCache.diskUsage()
+                } label: {
+                    Label("清空缓存", systemImage: "trash")
+                }
+                .disabled(cacheSize == 0)
+            } header: {
+                Text("缓存")
+            } footer: {
+                Text("封面图片和接口响应的本地副本,清空后会在下次浏览时重新下载。歌单、已下载的歌曲和自定义音源不受影响")
+            }
+
             Section("关于") {
                 LabeledContent("版本", value: appVersion)
             }
@@ -146,6 +168,7 @@ struct SettingsView: View {
         // 还要靠 onDisappear 恢复全局状态。换成 SwiftUI 的 per-view 修饰符,只作用
         // 于当前 NavigationStack,不污染别处。
         .sheetNavBarSurface()
+        .task { cacheSize = AppCache.diskUsage() }
     }
 
     private var appVersion: String {
