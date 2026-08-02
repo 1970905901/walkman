@@ -34,17 +34,28 @@ enum CoverImageCache {
         return memory.object(forKey: key(url, maxPixel))
     }
 
-    /// 未命中时下载 + 按目标尺寸解码。网络层走 URLSession,自动吃 URLCache。
+    /// 未命中时读取 + 按目标尺寸解码。网络走 URLSession(自动吃 URLCache),
+    /// 本地文件直接读盘 —— 已下载歌曲的封面是 file:// (见 DownloadStore
+    /// .displayCoverURL),它的响应不是 HTTPURLResponse,不能按网络那套判断。
     static func load(_ url: String?, maxPixel: CGFloat) async -> UIImage? {
-        guard let url, let remote = URL(string: url) else { return nil }
+        guard let url, let source = URL(string: url) else { return nil }
         if let hit = cached(url, maxPixel: maxPixel) { return hit }
-        var req = URLRequest(url: remote)
-        // 默认策略即可:有本地副本且未过期就直接用,过期则带 If-Modified-Since 校验
-        req.cachePolicy = .useProtocolCachePolicy
-        req.timeoutInterval = 15
-        guard let (data, response) = try? await URLSession.shared.data(for: req),
-              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let image = downsample(data, maxPixel: maxPixel) else { return nil }
+        let data: Data?
+        if source.isFileURL {
+            data = try? Data(contentsOf: source, options: .mappedIfSafe)
+        } else {
+            var req = URLRequest(url: source)
+            // 默认策略即可:有本地副本且未过期就直接用,过期则带 If-Modified-Since 校验
+            req.cachePolicy = .useProtocolCachePolicy
+            req.timeoutInterval = 15
+            if let (body, response) = try? await URLSession.shared.data(for: req),
+               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                data = body
+            } else {
+                data = nil
+            }
+        }
+        guard let data, let image = downsample(data, maxPixel: maxPixel) else { return nil }
         memory.setObject(image, forKey: key(url, maxPixel), cost: cost(of: image))
         return image
     }
@@ -128,6 +139,8 @@ enum CoverURL {
     /// 认不出的 URL 原样返回,绝不猜。
     static func sized(_ url: String?, maxPixel: CGFloat) -> String? {
         guard let url, !url.isEmpty else { return url }
+        // 本地文件(已下载歌曲的内嵌封面)没有尺寸档位,原样返回
+        guard !url.hasPrefix("file:") else { return url }
         let want = Int(maxPixel * UITraitCollection.current.displayScale)
 
         // QQ 专辑图:.../T002R300x300M000<mid>.jpg,尺寸档位夹在 R 和 M 之间
