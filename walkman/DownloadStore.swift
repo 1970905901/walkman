@@ -75,7 +75,10 @@ final class DownloadStore: ObservableObject {
 
     private init() {
         let docs = AppPaths.documents
-        let legacy = docs.appendingPathComponent("Downloads", isDirectory: true)
+        // legacy 必须指向**搬迁前**的老路径:早期版本把歌下载在 ~/Documents/Downloads,
+        // 那些音频文件没有跟着 json 一起搬(搬用户的音乐文件风险太大),所以升级后
+        // 仍要能在原地找到它们,否则已下载的歌会集体变成"文件不存在"。
+        let legacy = AppPaths.legacyBase.appendingPathComponent("Downloads", isDirectory: true)
         // JSON 状态文件永远跟 app 走(沙盒 Documents),不动它,免得迁移踩坑。
         self.foldersURL = docs.appendingPathComponent("downloadFolders.json")
         self.recordsURL = docs.appendingPathComponent("downloadRecords.json")

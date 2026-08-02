@@ -18,6 +18,13 @@ enum AppPaths {
         #endif
     }()
 
+    /// 收进子目录之前的老位置(Mac 上就是用户真实的 ~/Documents)。
+    /// 只用于定位早期版本遗留在那里、且不适合搬动的东西 —— 比如已下载的音频
+    /// 文件。搬 json 是安全的,搬用户的音乐文件不是,所以那些就地兼容读取。
+    static var legacyBase: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
     /// 可重建的缓存目录(内嵌封面等)。
     static let caches: URL = {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
