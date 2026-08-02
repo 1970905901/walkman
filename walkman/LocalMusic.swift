@@ -28,7 +28,7 @@ final class LocalMusicStore {
     private var folders: [FolderRecord] = []
     private var rootCache: [UUID: URL] = [:]
     private let storeURL: URL = {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = AppPaths.documents
         return dir.appendingPathComponent("localFolders.json")
     }()
 

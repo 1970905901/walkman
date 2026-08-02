@@ -29,7 +29,7 @@ final class PlayHistoryStore: ObservableObject {
     private let maxEvents = 5000
 
     init() {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = AppPaths.documents
         self.tracksURL = dir.appendingPathComponent("playHistory.json")
         self.eventsURL = dir.appendingPathComponent("playEvents.json")
         load()

@@ -74,7 +74,7 @@ final class DownloadStore: ObservableObject {
     @Published private(set) var cachedCoverIDs: Set<String> = []
 
     private init() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let docs = AppPaths.documents
         let legacy = docs.appendingPathComponent("Downloads", isDirectory: true)
         // JSON 状态文件永远跟 app 走(沙盒 Documents),不动它,免得迁移踩坑。
         self.foldersURL = docs.appendingPathComponent("downloadFolders.json")
@@ -98,7 +98,7 @@ final class DownloadStore: ObservableObject {
         self.legacyDir = nil
         #endif
 
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let caches = AppPaths.caches
         self.coverCacheDir = caches.appendingPathComponent("EmbeddedCovers", isDirectory: true)
         try? FileManager.default.createDirectory(at: coverCacheDir, withIntermediateDirectories: true)
 

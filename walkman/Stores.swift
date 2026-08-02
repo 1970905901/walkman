@@ -25,7 +25,7 @@ final class PlaylistStore: ObservableObject {
     private var cloudCancellable: AnyCancellable?
 
     init() {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = AppPaths.documents
         self.playlistsURL = dir.appendingPathComponent("playlists.json")
         self.trackBankURL = dir.appendingPathComponent("trackBank.json")
         self.tombstonesURL = dir.appendingPathComponent("deletedPlaylists.json")
@@ -284,7 +284,7 @@ final class ScriptStore: ObservableObject {
     private var cloudCancellable: AnyCancellable?
 
     init() {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = AppPaths.documents
         self.url = dir.appendingPathComponent("scripts.json")
         load()
         // Migrate from cloud if local is empty (fresh install on a 2nd device).

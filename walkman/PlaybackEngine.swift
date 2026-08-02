@@ -124,7 +124,7 @@ final class PlaybackEngine: ObservableObject {
     private var wasPlayingBeforeInterruption = false
     /// Where the last session (queue + position) is persisted so we can restore on next launch.
     private let stateURL: URL = {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = AppPaths.documents
         return dir.appendingPathComponent("playbackState.json")
     }()
     private var lastPersist = Date.distantPast
