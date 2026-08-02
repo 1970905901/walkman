@@ -183,6 +183,10 @@ struct CoverImage<Content: View, Placeholder: View>: View {
     private let placeholder: () -> Placeholder
 
     @State private var image: UIImage?
+    /// 回到前台后请求重试用。@State 的初始值只在视图首次创建时生效,而
+    /// 播放页的封面视图身份是稳定的(切歌不重建),所以不能只靠 url 变化驱动。
+    @State private var retryToken = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     init(url: String?,
          maxPixel: CGFloat,
@@ -193,7 +197,7 @@ struct CoverImage<Content: View, Placeholder: View>: View {
         self.maxPixel = maxPixel
         self.content = content
         self.placeholder = placeholder
-        // 关键:在 init 里同步查一次缓存,命中则首帧就有图
+        // 首次创建时同步查一次缓存,命中则首帧就有图
         _image = State(initialValue: CoverImageCache.cached(resolved, maxPixel: maxPixel))
     }
 
@@ -205,10 +209,31 @@ struct CoverImage<Content: View, Placeholder: View>: View {
                 placeholder()
             }
         }
-        .task(id: url) {
-            guard image == nil else { return }
-            let loaded = await CoverImageCache.load(url, maxPixel: maxPixel)
-            if !Task.isCancelled { image = loaded }
+        // id 里带上 retryToken:url 变化或请求重试时都会重建任务,
+        // SwiftUI 会自动取消上一个,不会出现两个任务竞争写同一个 @State。
+        .task(id: "\(url ?? "")|\(retryToken)") {
+            await load()
         }
+        .onChange(of: scenePhase) { _, phase in
+            // 后台期间任务会被取消,回前台时如果还是占位图就再试一次 ——
+            // 否则"最小化时切了几首歌,回来封面一直空着"会一直好不了。
+            if phase == .active, image == nil {
+                retryToken &+= 1
+            }
+        }
+    }
+
+    private func load() async {
+        // 换歌时先同步查缓存:命中直接换图不闪;没命中要清掉上一首的图,
+        // 不然会把上一首的封面挂在新歌上。
+        if let hit = CoverImageCache.cached(url, maxPixel: maxPixel) {
+            image = hit
+            return
+        }
+        image = nil
+        let loaded = await CoverImageCache.load(url, maxPixel: maxPixel)
+        // 被取消说明 url 已经换了或视图没了,这次结果作废
+        guard !Task.isCancelled else { return }
+        image = loaded
     }
 }

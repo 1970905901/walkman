@@ -126,15 +126,19 @@ struct RootTabView: View {
     private var phoneTabs: some View {
         TabView(selection: $activeTab) {
             NavigationStack(path: $searchPath) { SearchView() }
+                .miniPlayerInset()
                 .tabItem { Label(WalkmanSection.search.title, systemImage: WalkmanSection.search.systemImage) }
                 .tag(WalkmanSection.search.tag)
             NavigationStack(path: $leaderboardPath) { LeaderboardView() }
+                .miniPlayerInset()
                 .tabItem { Label(WalkmanSection.leaderboard.title, systemImage: WalkmanSection.leaderboard.systemImage) }
                 .tag(WalkmanSection.leaderboard.tag)
             NavigationStack(path: $songlistPath) { SonglistView() }
+                .miniPlayerInset()
                 .tabItem { Label(WalkmanSection.songlist.title, systemImage: WalkmanSection.songlist.systemImage) }
                 .tag(WalkmanSection.songlist.tag)
             NavigationStack(path: $libraryPath) { LibraryView() }
+                .miniPlayerInset()
                 .tabItem { Label(WalkmanSection.library.title, systemImage: WalkmanSection.library.systemImage) }
                 .tag(WalkmanSection.library.tag)
         }

@@ -1,5 +1,28 @@
 import SwiftUI
 
+extension View {
+    /// 给内容底部让出 MiniPlayer 占的高度。
+    ///
+    /// MiniPlayer 是浮在 TabView 之上的 overlay(见 RootTabView.overlays),
+    /// overlay 不参与布局,所以列表滚到底时最后一行会被它盖住。这里用
+    /// safeAreaInset 补上等高的安全区 —— 挂在 NavigationStack 上,push 进去的
+    /// 详情页也会继承,不用每个页面各自记着留白。没在播放时不占空间。
+    func miniPlayerInset() -> some View {
+        modifier(MiniPlayerInset())
+    }
+}
+
+private struct MiniPlayerInset: ViewModifier {
+    @EnvironmentObject var playback: PlaybackEngine
+
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear
+                .frame(height: playback.currentTrack != nil ? MiniPlayer.cardHeight + DS.Spacing.s : 0)
+        }
+    }
+}
+
 struct MiniPlayer: View {
     @EnvironmentObject var playback: PlaybackEngine
     @ObservedObject private var downloads = DownloadStore.shared
@@ -48,6 +71,10 @@ struct MiniPlayer: View {
             .onTapGesture { onTap() }
         }
     }
+
+    /// 卡片自身的高度:封面 42 + 上下 padding 6 各一。给 miniPlayerInset 用,
+    /// 改了这里的布局记得跟着改,否则列表底部要么被挡要么留白过多。
+    static let cardHeight: CGFloat = 42 + 6 * 2
 
     private var progress: Double {
         guard playback.duration > 0 else { return 0 }
