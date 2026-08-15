@@ -1,95 +1,251 @@
 import SwiftUI
+import Combine
+
+/// 迷你播放器的尺寸常量。放一处,免得 RootTabView 里的留白和这里的高度各改各的对不上。
+///
+/// ⚠️ bottomGap 是贴着 iOS 26 悬浮 tabbar 试出来的硬编码值。它假定了 tabbar 的高度,
+/// 换机型(有无 Home 指示条)可能需要重调。真要做稳,得在运行时读真实 UITabBar 的高度。
+enum MiniPlayerMetrics {
+    /// 悬浮条自身高度
+    static let barHeight: CGFloat = 52
+    /// 左右缩进 —— 要比 tabbar 那颗胶囊窄一点
+    static let horizontalInset: CGFloat = 20
+    /// 底部垫高 —— 把悬浮条抬离 tabbar。垫少了两颗胶囊会贴在一起看着像一坨。
+    static let bottomGap: CGFloat = 52
+    /// 列表底部要额外让出的高度,给 .contentMargins 用。
+    /// 只需让开悬浮条本身(tabbar 那段系统已经算进安全区了),再留一点缝。
+    static let scrollBottomMargin: CGFloat = barHeight + 10
+}
 
 struct MiniPlayer: View {
-    @EnvironmentObject var playback: PlaybackEngine
-    @ObservedObject private var downloads = DownloadStore.shared
+    /// 刻意**不**观察 PlaybackEngine —— 它的 currentTime 每 0.25 秒发布一次,
+    /// 观察它就等于每秒重建 4 次,配件位里正在进行的触摸会被打断(见 NowPlayingBar)。
+    /// 这里只观察低频镜像;要发指令时才通过 engine 取引擎,那是取值不是观察。
+    @ObservedObject private var now = NowPlayingBar.shared
+
+    @Environment(\.colorScheme) private var colorScheme
     var onTap: () -> Void
 
-    var body: some View {
-        if let track = playback.currentTrack {
-            HStack(spacing: 10) {
-                // 这里刻意不用 Artwork/CoverImage:标签栏配件位(tabViewBottomAccessory)
-                // 这个宿主环境不执行 .task/.onChange,自建的异步加载拿不到结果,封面
-                // 会一直停在占位图。AsyncImage 由系统内部驱动,不受这个限制。
-                // 只有这一处 42pt 小图,少一层内存缓存无所谓。
-                AsyncImage(url: downloads.displayCoverURL(for: track).flatMap(URL.init(string:))) { phase in
-                    if case .success(let img) = phase {
-                        img.resizable().scaledToFill()
-                    } else {
-                        LinearGradient(colors: [Color(.tertiarySystemFill), Color(.quaternarySystemFill)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing)
-                            .overlay(Image(systemName: "music.note").font(.system(size: 17)).foregroundColor(.secondary))
-                    }
-                }
-                .frame(width: 42, height: 42)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.small, style: .continuous))
+    private var engine: PlaybackEngine? { AppServices.shared.playback }
 
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(track.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                        if let q = playback.currentQuality {
-                            QualityBadge(style: QualityBadgeStyle(quality: q))
+    // 💡 核心修复：直接读取 iOS 系统真正的白天/夜间外观，防止被歌单页局部的 .colorScheme(.dark) 污染
+    private var isSystemDarkMode: Bool {
+        #if os(iOS)
+        if let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+           let window = scene.windows.first(where: { $0.isKeyWindow }) {
+            return window.traitCollection.userInterfaceStyle == .dark
+        }
+        #endif
+        return colorScheme == .dark
+    }
+
+    var body: some View {
+        if let track = now.track {
+            HStack(spacing: 10) {
+                // 普通 Button 即可。这里一度堆过 DragGesture / 自定义 UIKit 识别器,
+                // 那是在跟 tabViewBottomAccessory 的宿主抢触摸 —— 现在不用配件位了
+                // (见 RootTabView 里挂载方式的说明),触摸走正常路径,不需要任何特技。
+                Button(action: onTap) {
+                    HStack(spacing: 10) {
+                    // 封面
+                        Group {
+                            if let img = now.cover {
+                                Image(uiImage: img).resizable().scaledToFill()
+                            } else {
+                                LinearGradient(colors: [Color(.tertiarySystemFill), Color(.quaternarySystemFill)],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                                    .overlay(Image(systemName: "music.note").font(.system(size: 16)).foregroundColor(.secondary))
+                            }
                         }
+                        .frame(width: 38, height: 38)
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 4) {
+                                Text(track.name)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    // 💡 改用全局安全的 isSystemDarkMode 判断
+                                    .foregroundStyle(isSystemDarkMode ? Color.white : Color.black.opacity(0.9))
+                                    .lineLimit(1)
+
+                                if let q = now.quality {
+                                    QualityBadge(style: QualityBadgeStyle(quality: q))
+                                }
+                            }
+                            Text(track.singer)
+                                .font(.system(size: 11))
+                                // 💡 改用全局安全的 isSystemDarkMode 判断
+                                .foregroundStyle(isSystemDarkMode ? Color.white.opacity(0.65) : Color.black.opacity(0.6))
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 0)
                     }
-                    Text(track.singer).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+                // 连同 Spacer 占的空白一起可点,不用非得戳中文字
+                .contentShape(Rectangle())
                 }
-                Spacer(minLength: 0)
-                if playback.isBuffering {
+                .buttonStyle(.plain)
+
+                if now.isBuffering {
                     UIKitSpinner(style: .medium).frame(width: 30, height: 30)
                 } else {
-                    PlayPauseRing(progress: progress, isPlaying: playback.isPlaying) {
-                        playback.togglePlayPause()
+                    PlayPauseRing(isPlaying: now.isPlaying, isDark: isSystemDarkMode) {
+                        engine?.togglePlayPause()
                     }
                 }
-                Button { playback.next() } label: {
+                
+                Button { engine?.next() } label: {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.primary.opacity(0.85))
-                        .frame(width: 30, height: 30)
+                        // 💡 改用全局安全的 isSystemDarkMode 判断
+                        .foregroundStyle(isSystemDarkMode ? Color.white.opacity(0.85) : Color.black.opacity(0.8))
+                        // 图标 30,但命中区放到 44 —— 小于 44 的目标在手机上明显难点
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, DS.Spacing.s)
-            .padding(.vertical, 6)
-            .background(DS.Glass.mid)   // mid pane — heavier than .ultraThin so the mini player reads as a "surface" against any underlying content
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous))
+            .padding(.horizontal, 12)
+            // 自绘悬浮条:挂在 TabView 的 safeAreaInset 上,外观得自己给
+            // (配件位时期这些是系统容器提供的)
+            .frame(height: MiniPlayerMetrics.barHeight)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.large, style: .continuous)
-                    .stroke(DS.Palette.strokeSubtle, lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(isSystemDarkMode ? Color.white.opacity(0.10) : Color.black.opacity(0.06),
+                            lineWidth: 0.5)
             )
-            .elevation(DS.Elevation.e2())
-            .padding(.horizontal, DS.Spacing.s)
-            .contentShape(Rectangle())
-            .onTapGesture { onTap() }
+            .shadow(color: .black.opacity(isSystemDarkMode ? 0.35 : 0.12), radius: 10, y: 3)
         }
     }
 
-    private var progress: Double {
-        guard playback.duration > 0 else { return 0 }
-        return min(1, max(0, playback.currentTime / playback.duration))
+}
+
+// MARK: - 进度环
+//
+// ⚠️ 这里是整个"播放时点不动"问题的根子,改动前先读完这段。
+//
+// 播放时 PlaybackEngine 每 0.25 秒发一次 currentTime。以前进度环用 SwiftUI 画,
+// 观察 PlaybackTicker 拿进度 —— 于是每秒有 4 次 SwiftUI 内容失效发生在
+// 标签栏配件位(tabViewBottomAccessory)里面。
+//
+// 之前试过把观察范围"收窄"到这个叶子视图,以为影响面小就没事了。没用:
+// 配件位宿主只要收到内容失效就要重新布局一次,布局会把正在进行的触摸打断。
+// 子树多小无所谓,4Hz 的布局照做 —— 一次点击 200~400ms,必然横跨 1~2 次,
+// 所以表现就是"一播放就点不动,暂停了反而正常"。
+//
+// 真正的解法是让宿主根本不知道有更新:进度环整个下沉到 UIKit,由 CAShapeLayer
+// 自己订阅、自己改 strokeEnd。SwiftUI 视图树从头到尾是静止的,不产生任何失效,
+// 宿主不布局,触摸自然不会被打断。
+//
+// 因此:不要把进度重新接回任何 SwiftUI 的 @State/@ObservedObject。
+
+/// 只负责画那圈进度。自己订阅 4Hz,只改图层,不碰 SwiftUI。
+private final class RingLayerView: UIView {
+    private let trackLayer = CAShapeLayer()
+    private let progressLayer = CAShapeLayer()
+    private var bag = Set<AnyCancellable>()
+    private var lastValue: CGFloat = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        // 关键:不吃触摸,点击要能穿过去落到外面那个 Button 上
+        isUserInteractionEnabled = false
+
+        for l in [trackLayer, progressLayer] {
+            l.fillColor = UIColor.clear.cgColor
+            l.lineWidth = 2
+            l.lineCap = .round
+            layer.addSublayer(l)
+        }
+        progressLayer.strokeEnd = 0
+
+        // 直接订阅进度。注意这条链的终点是 CALayer,不是 SwiftUI ——
+        // 这正是它不会打断触摸的原因。
+        PlaybackTicker.shared.$fraction
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.apply(CGFloat($0)) }
+            .store(in: &bag)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func setColors(track: UIColor, progress: UIColor) {
+        trackLayer.strokeColor = track.cgColor
+        progressLayer.strokeColor = progress.cgColor
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let r = (min(bounds.width, bounds.height) - trackLayer.lineWidth) / 2
+        let c = CGPoint(x: bounds.midX, y: bounds.midY)
+        // 直接从 12 点起画,省掉旋转变换
+        let path = UIBezierPath(arcCenter: c, radius: max(0, r),
+                                startAngle: -.pi / 2, endAngle: 1.5 * .pi,
+                                clockwise: true).cgPath
+        trackLayer.frame = bounds
+        progressLayer.frame = bounds
+        trackLayer.path = path
+        progressLayer.path = path
+    }
+
+    private func apply(_ raw: CGFloat) {
+        let v = min(1, max(0, raw))
+        defer { lastValue = v }
+
+        // 换歌/拖动进度会整条跳,这种不做补间,否则会看到指针绕一圈
+        let isJump = abs(v - lastValue) > 0.2
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        progressLayer.strokeEnd = v
+        CATransaction.commit()
+
+        if !isJump {
+            // 0.25 秒来一次,补一段 0.4 秒线性动画把台阶抹平(和原来 SwiftUI 的观感一致)
+            let anim = CABasicAnimation(keyPath: "strokeEnd")
+            anim.fromValue = lastValue
+            anim.toValue = v
+            anim.duration = 0.4
+            anim.timingFunction = CAMediaTimingFunction(name: .linear)
+            progressLayer.add(anim, forKey: "strokeEnd")
+        } else {
+            progressLayer.removeAnimation(forKey: "strokeEnd")
+        }
     }
 }
 
+private struct RingProgress: UIViewRepresentable {
+    let isDark: Bool
+
+    func makeUIView(context: Context) -> RingLayerView { RingLayerView() }
+
+    func updateUIView(_ v: RingLayerView, context: Context) {
+        // 只在明暗切换时走到这里,低频,不影响触摸
+        v.setColors(track: isDark ? UIColor(DS.Palette.strokeStrong) : UIColor(white: 0, alpha: 0.12),
+                    progress: UIColor(DS.Palette.brandStart))
+    }
+}
+
+/// 播放/暂停按钮。SwiftUI 这层只随 isPlaying / isDark 变化重建 —— 都是低频。
 private struct PlayPauseRing: View {
-    let progress: Double
     let isPlaying: Bool
+    let isDark: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle()
-                    .stroke(DS.Palette.strokeStrong, lineWidth: 2)
+                RingProgress(isDark: isDark)
                     .frame(width: 30, height: 30)
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(DS.Palette.brandStart, style: .init(lineWidth: 2, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: 30, height: 30)
-                    .animation(.linear(duration: 0.4), value: progress)
+
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 12, weight: .heavy))
                     .foregroundStyle(DS.Palette.brandGradient)
             }
+            // 进度环画 30,命中区放到 44
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

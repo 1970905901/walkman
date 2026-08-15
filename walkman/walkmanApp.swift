@@ -60,6 +60,10 @@ struct walkmanApp: App {
             playback: playback, sources: sources, playlists: playlists,
             scripts: scripts, settings: settings, downloads: downloads,
             history: history)
+        // 迷你播放器只观察这两个镜像,不直接观察引擎(引擎每 0.25 秒发一次进度,
+        // 观察它的视图会跟着每秒重建 4 次,配件位里的触摸因此被打断)。
+        NowPlayingBar.shared.bind(to: playback)
+        PlaybackTicker.shared.bind(to: playback)
     }
 
     var body: some Scene {

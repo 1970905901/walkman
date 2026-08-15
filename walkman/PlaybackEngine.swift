@@ -104,6 +104,10 @@ final class PlaybackEngine: ObservableObject {
     private var statusObservation: NSKeyValueObservation?
     private var bufferEmptyObservation: NSKeyValueObservation?
     private var currentArtwork: MPMediaItemArtwork?
+    /// 当前曲目封面。锁屏封面本来就要下载,顺手发布出来给迷你播放器用 ——
+    /// 标签栏配件位那个宿主不跑 .task,也收不到别的 ObservableObject 的更新,
+    /// 只有挂在它已经在观察的 playback 上才保证刷新;顺带也省一次重复下载。
+    @Published private(set) var nowPlayingCover: UIImage?
     /// Timed lyric lines for the current track. Used to show the current line in the now-playing
     /// album field (CarPlay/lock-screen) instead of the album name, synced to playback position.
     private var currentLyrics: [LyricLine] = []
@@ -782,6 +786,7 @@ final class PlaybackEngine: ObservableObject {
 
     private func loadArtwork() {
         currentArtwork = nil
+        nowPlayingCover = nil
         guard let track = currentTrack else { return }
         // 已下载的歌:封面读本地缓存(文件内嵌封面提取的),离线可用;否则走网络 picURL。
         let localURL = localArtworkProvider?(track)
@@ -794,6 +799,7 @@ final class PlaybackEngine: ObservableObject {
             guard let img else { return }
             await MainActor.run { [weak self] in
                 self?.currentArtwork = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
+                self?.nowPlayingCover = img
                 self?.updateNowPlayingInfo()
             }
         }

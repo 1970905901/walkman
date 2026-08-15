@@ -81,8 +81,36 @@ enum WalkmanSection: String, Hashable, CaseIterable, Identifiable {
 /// sizeClass branches inside SearchView/LibraryView/etc. Each platform owns its
 /// own visual language. Shared layer = models, stores, playback, design tokens,
 /// resolvers — anything that isn't a screen.
+/// 播放错误 / 降级提示横幅。单独成一个视图,把"观察 PlaybackEngine"这件事
+/// 圈在这里 —— 引擎每 0.25 秒发布一次进度,谁观察它谁就每秒重建 4 次。
+private struct PlaybackBanners: View {
+    /// 同样只读低频镜像,不观察 engine —— engine 每 0.25 秒发一次进度,
+    /// 观察它就等于在根视图树里每秒制造 4 次失效(见 NowPlayingBar)。
+    /// 要清空提示时通过 AppServices 取引擎写回,那是取值不是观察。
+    @ObservedObject private var now = NowPlayingBar.shared
+    @EnvironmentObject var settings: SettingsStore
+    let hasTrack: Bool
+
+    private var engine: PlaybackEngine? { AppServices.shared.playback }
+
+    var body: some View {
+        if let err = now.lastError {
+            ErrorBanner(text: err, tone: .warning) { engine?.lastError = nil }
+                .padding(.bottom, hasTrack ? 110 : 60)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(duration: 0.3), value: now.lastError)
+        } else if let notice = now.cascadeNotice, settings.showDebugNotices {
+            ErrorBanner(text: notice, tone: .info) { engine?.cascadeNotice = nil }
+                .padding(.bottom, hasTrack ? 110 : 60)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(duration: 0.3), value: now.cascadeNotice)
+        }
+    }
+}
+
 struct RootTabView: View {
-    @EnvironmentObject var playback: PlaybackEngine
+    /// 只观察低频镜像,不观察 PlaybackEngine —— 见 NowPlayingBar 的说明
+    @ObservedObject private var now = NowPlayingBar.shared
     @EnvironmentObject var settings: SettingsStore
     @Environment(\.horizontalSizeClass) private var hSize
     @State private var showPlayer = false
@@ -125,28 +153,61 @@ struct RootTabView: View {
 
     private var phoneTabs: some View {
         TabView(selection: $activeTab) {
-            NavigationStack(path: $searchPath) { SearchView() }
-                .tabItem { Label(WalkmanSection.search.title, systemImage: WalkmanSection.search.systemImage) }
-                .tag(WalkmanSection.search.tag)
-            NavigationStack(path: $leaderboardPath) { LeaderboardView() }
-                .tabItem { Label(WalkmanSection.leaderboard.title, systemImage: WalkmanSection.leaderboard.systemImage) }
-                .tag(WalkmanSection.leaderboard.tag)
-            NavigationStack(path: $songlistPath) { SonglistView() }
-                .tabItem { Label(WalkmanSection.songlist.title, systemImage: WalkmanSection.songlist.systemImage) }
-                .tag(WalkmanSection.songlist.tag)
-            NavigationStack(path: $libraryPath) { LibraryView() }
-                .tabItem { Label(WalkmanSection.library.title, systemImage: WalkmanSection.library.systemImage) }
-                .tag(WalkmanSection.library.tag)
-        }
-        // 迷你播放器交给系统的标签栏配件位(iOS 26)。之前是自己在 ZStack 里浮一层
-        // overlay,overlay 不参与布局,列表最后一行会被压住;在 NavigationStack 上
-        // 补 safeAreaInset 实测也不生效(栈内的滚动视图拿不到这层安全区)。
-        // 用原生配件位则由系统负责排布与内容避让,和 Apple Music 的行为一致。
-        .tabViewBottomAccessory {
-            if playback.currentTrack != nil {
-                MiniPlayer(onTap: openPlayer)
+            Tab(WalkmanSection.search.title,
+                systemImage: WalkmanSection.search.systemImage,
+                value: WalkmanSection.search.tag) {
+                NavigationStack(path: $searchPath) { SearchView() }
+            }
+            Tab(WalkmanSection.leaderboard.title,
+                systemImage: WalkmanSection.leaderboard.systemImage,
+                value: WalkmanSection.leaderboard.tag) {
+                NavigationStack(path: $leaderboardPath) { LeaderboardView() }
+            }
+            Tab(WalkmanSection.songlist.title,
+                systemImage: WalkmanSection.songlist.systemImage,
+                value: WalkmanSection.songlist.tag) {
+                NavigationStack(path: $songlistPath) { SonglistView() }
+            }
+            Tab(WalkmanSection.library.title,
+                systemImage: WalkmanSection.library.systemImage,
+                value: WalkmanSection.library.tag) {
+                NavigationStack(path: $libraryPath) { LibraryView() }
             }
         }
+        // ⚠️ 迷你播放器的挂载方式,改之前务必读完这段 —— 这里来回折腾过很多次。
+        //
+        // 三种做法的实际结果:
+        //   1. ZStack 里浮一层 overlay          → 点击正常,但 overlay 不参与布局,
+        //                                        列表最后一行被压住
+        //   2. NavigationStack 上补 safeAreaInset → 不生效。栈内的滚动视图已经铺满了,
+        //                                        拿不到这层安全区
+        //   3. .tabViewBottomAccessory(iOS 26)  → 遮挡解决了,但配件位宿主里的触摸
+        //                                        时灵时不灵,播放中尤其明显。为此试过
+        //                                        Button / DragGesture / 自定义 UIKit
+        //                                        识别器 / 把 4Hz 刷新彻底移出 SwiftUI,
+        //                                        全都没能修好
+        //
+        // 现在用第 4 种:safeAreaInset 挂在 **TabView** 这一层,画出这条悬浮的迷你播放器;
+        // 它就是普通 SwiftUI 视图,触摸走正常路径,没有配件位那个黑盒 —— 点击问题因此解决。
+        //
+        // 但它只负责"画",不负责"让位":实测这层 safeAreaInset 不会算进 tab 内容的
+        // 安全区,NavigationStack 里 push 出来的二级页尤其收不到,列表最后一行照样被压住。
+        // 让位由下面的 .contentMargins 单独负责 —— 那个是走环境传递的,能进到 push 页里。
+        // 两件事拆开做,别指望一个修饰符全包。
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // 条件读低频镜像 —— 读 playback 会让整个 phoneTabs 每秒重建 4 次
+            if now.track != nil {
+                MiniPlayer(onTap: openPlayer)
+                    .padding(.horizontal, MiniPlayerMetrics.horizontalInset)
+                    .padding(.bottom, MiniPlayerMetrics.bottomGap)
+            }
+        }
+        // 让位。.contentMargins 通过环境传递给子树里所有滚动视图,包括
+        // NavigationStack push 出来的二级页 —— 这正是 safeAreaInset 到不了的地方。
+        // 没歌在放时不留白,免得列表底部凭空多一块空隙。
+        .contentMargins(.bottom,
+                        now.track != nil ? MiniPlayerMetrics.scrollBottomMargin : 0,
+                        for: .scrollContent)
     }
 
     // MARK: - Overlays (mini player, error banner, full player)
@@ -155,17 +216,11 @@ struct RootTabView: View {
     private var overlays: some View {
         // iPhone 的 MiniPlayer 现在挂在 TabView 的原生配件位上(见 phoneTabs),
         // 不再是这里的浮层。iPad/Mac 有自己的 IPadBottomBar,同样不走这里。
-        if let err = playback.lastError {
-            ErrorBanner(text: err, tone: .warning) { playback.lastError = nil }
-                .padding(.bottom, playback.currentTrack != nil ? 110 : 60)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .animation(.spring(duration: 0.3), value: playback.lastError)
-        } else if let notice = playback.cascadeNotice, settings.showDebugNotices {
-            ErrorBanner(text: notice, tone: .info) { playback.cascadeNotice = nil }
-                .padding(.bottom, playback.currentTrack != nil ? 110 : 60)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .animation(.spring(duration: 0.3), value: playback.cascadeNotice)
-        }
+        //
+        // 横幅拆成独立子视图:它必须观察 playback(错误/提示都在引擎上),
+        // 而 playback 每 0.25 秒发一次进度。放在这里会把整个根视图拖着一起
+        // 每秒重建 4 次,配件位里的触摸就被打断了 —— 只让子视图承担这份重建。
+        PlaybackBanners(hasTrack: now.track != nil)
 
         // PlayerView overlay only fires for iPhone (compact). iPad/Mac own
         // their player as a content-area swap inside IPadRootView so the

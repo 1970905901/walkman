@@ -218,6 +218,11 @@ struct ChipBar<T: Hashable>: View {
             .padding(.horizontal, DS.Spacing.l)
             .padding(.vertical, 2)
         }
+        // RootTabView 在 TabView 上挂了 .contentMargins(.bottom) 给迷你播放器让位。
+        // 那个修饰符是走环境广播的,子树里**所有**滚动视图都会吃到 —— 包括这条横向
+        // chip 条,于是 chip 下面凭空多出一大片空白。这里显式复位成 0。
+        // 新增横向 ScrollView 时记得照做。
+        .contentMargins(.bottom, 0, for: .scrollContent)
         // Subtle haptic on every selection change — the kind of "click" Apple uses on
         // segmented controls. Doesn't fire on the initial value, only on change.
         .sensoryFeedback(.selection, trigger: selection)
