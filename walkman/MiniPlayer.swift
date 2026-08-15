@@ -2,19 +2,84 @@ import SwiftUI
 import Combine
 
 /// 迷你播放器的尺寸常量。放一处,免得 RootTabView 里的留白和这里的高度各改各的对不上。
-///
-/// ⚠️ bottomGap 是贴着 iOS 26 悬浮 tabbar 试出来的硬编码值。它假定了 tabbar 的高度,
-/// 换机型(有无 Home 指示条)可能需要重调。真要做稳,得在运行时读真实 UITabBar 的高度。
 enum MiniPlayerMetrics {
     /// 悬浮条自身高度
     static let barHeight: CGFloat = 52
     /// 左右缩进 —— 要比 tabbar 那颗胶囊窄一点
     static let horizontalInset: CGFloat = 20
-    /// 底部垫高 —— 把悬浮条抬离 tabbar。垫少了两颗胶囊会贴在一起看着像一坨。
-    static let bottomGap: CGFloat = 52
+    /// 悬浮条与 tabbar 之间想要的缝隙。
+    ///
+    /// 这是**设计值**,不是设备参数 —— 嫌宽窄改这一个数就行,所有机型跟着变。
+    /// (之前硬编码 bottomGap = 52 时,实际视觉间距差不多就是这个数;
+    ///  一度设成 10,真机上看着比原来松,所以回调到 6。)
+    static let desiredGap: CGFloat = 6
+    /// 量不到真实 tabbar 时的兜底垫高(iPhone 15 Pro 上实测出来的值)
+    static let fallbackBottomGap: CGFloat = 52
+    /// 列表最后一行与悬浮条之间的呼吸空间。
+    /// 刻意不复用 desiredGap —— 那个是"悬浮条和 tabbar 的缝",两码事,
+    /// 共用会导致调间距时把列表留白也一起改了。
+    static let scrollBreathingRoom: CGFloat = 10
     /// 列表底部要额外让出的高度,给 .contentMargins 用。
     /// 只需让开悬浮条本身(tabbar 那段系统已经算进安全区了),再留一点缝。
-    static let scrollBottomMargin: CGFloat = barHeight + 10
+    static let scrollBottomMargin: CGFloat = barHeight + scrollBreathingRoom
+}
+
+/// 量真实 UITabBar 的位置,算出迷你播放器该垫多高。
+///
+/// 为什么要量:`.safeAreaInset` 把内容放在 TabView 底部安全区之上,而 iOS 26 的
+/// 悬浮 tabbar 是**浮在**这条带上的,不在安全区里 —— 两者会重叠。垫多少完全取决于
+/// tabbar 的实际位置,而它随机型变化(有无 Home 指示条、屏幕尺寸)。
+/// 之前用硬编码 52,是在一台机器上试出来的,换机器就偏。
+///
+/// 公式:垫高 = (tabbar 顶边距屏幕底的距离) − (底部安全区) + 想要的缝隙
+/// 代回实测值:76 − 34 + 10 = 52,和之前试出来的硬编码值吻合。
+@MainActor
+final class TabBarMetrics: ObservableObject {
+    static let shared = TabBarMetrics()
+
+    @Published private(set) var bottomGap: CGFloat = MiniPlayerMetrics.fallbackBottomGap
+
+    /// tabbar 未必在首次布局时就进了视图树,量不到就下一轮再试,最多几次。
+    private var retriesLeft = 5
+
+    func refresh() {
+        retriesLeft = 5
+        attempt()
+    }
+
+    private func attempt() {
+        guard let window = Self.keyWindow() else { return retry() }
+        guard let bar = Self.findTabBar(in: window), bar.bounds.height > 0 else { return retry() }
+
+        let inWindow = bar.convert(bar.bounds, to: nil)
+        let topFromBottom = window.bounds.height - inWindow.minY
+        let value = topFromBottom - window.safeAreaInsets.bottom + MiniPlayerMetrics.desiredGap
+
+        // 量到离谱的值宁可用兜底,也不要把悬浮条甩到屏幕中间去
+        guard value.isFinite, value > 0, value < 200 else { return }
+        if abs(value - bottomGap) > 0.5 { bottomGap = value }
+    }
+
+    private func retry() {
+        guard retriesLeft > 0 else { return }
+        retriesLeft -= 1
+        DispatchQueue.main.async { [weak self] in self?.attempt() }
+    }
+
+    private static func keyWindow() -> UIWindow? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }?
+            .windows.first { $0.isKeyWindow }
+    }
+
+    private static func findTabBar(in view: UIView) -> UITabBar? {
+        if let bar = view as? UITabBar { return bar }
+        for sub in view.subviews {
+            if let found = findTabBar(in: sub) { return found }
+        }
+        return nil
+    }
 }
 
 struct MiniPlayer: View {

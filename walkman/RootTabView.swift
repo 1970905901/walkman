@@ -111,6 +111,8 @@ private struct PlaybackBanners: View {
 struct RootTabView: View {
     /// 只观察低频镜像,不观察 PlaybackEngine —— 见 NowPlayingBar 的说明
     @ObservedObject private var now = NowPlayingBar.shared
+    /// 迷你播放器该垫多高,来自运行时量到的真实 tabbar 位置
+    @ObservedObject private var tabBar = TabBarMetrics.shared
     @EnvironmentObject var settings: SettingsStore
     @Environment(\.horizontalSizeClass) private var hSize
     @State private var showPlayer = false
@@ -199,9 +201,15 @@ struct RootTabView: View {
             if now.track != nil {
                 MiniPlayer(onTap: openPlayer)
                     .padding(.horizontal, MiniPlayerMetrics.horizontalInset)
-                    .padding(.bottom, MiniPlayerMetrics.bottomGap)
+                    // 垫高由运行时量出来的 tabbar 位置决定,不写死(见 TabBarMetrics)
+                    .padding(.bottom, tabBar.bottomGap)
             }
         }
+        // tabbar 未必在首次布局时就在视图树里,出现和切页时各量一次;
+        // 量出来的值没变就不会发通知,不会造成额外重建。
+        .onAppear { tabBar.refresh() }
+        .onChange(of: activeTab) { _, _ in tabBar.refresh() }
+        .onChange(of: now.track == nil) { _, _ in tabBar.refresh() }
         // 让位。.contentMargins 通过环境传递给子树里所有滚动视图,包括
         // NavigationStack push 出来的二级页 —— 这正是 safeAreaInset 到不了的地方。
         // 没歌在放时不留白,免得列表底部凭空多一块空隙。
