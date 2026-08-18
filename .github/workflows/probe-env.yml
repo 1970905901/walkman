@@ -1,0 +1,20 @@
+name: probe-env
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    steps:
+      - name: Probe toolchain
+        run: |
+          echo "=== sw_vers ==="; sw_vers
+          echo "=== xcodebuild -version ==="; xcodebuild -version
+          echo "=== xcodebuild -showsdks ==="; xcodebuild -showsdks
+          echo "=== /Applications (xcode) ==="; ls /Applications | grep -i xcode || true
+          echo "=== swift --version ==="; swift --version
+          echo "=== create-dmg / hdiutil ==="; which create-dmg hdiutil || true
